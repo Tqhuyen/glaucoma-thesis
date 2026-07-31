@@ -1,5 +1,8 @@
 # Glaucoma Thesis — 3D CNN Classification with Enterprise Training Pipeline
 
+[![CI](https://github.com/Tqhuyen/glaucoma-thesis/actions/workflows/ci.yml/badge.svg)](https://github.com/Tqhuyen/glaucoma-thesis/actions/workflows/ci.yml)
+[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Tqhuyen/glaucoma-thesis)
+
 Master thesis: **3D CNN for glaucoma detection from OCT scans**. One training pipeline that runs unchanged on Colab, vast.ai, an 8-GPU box, or a multi-node SLURM cluster — disconnect-proof, preemption-safe, CI-gated.
 
 ## Scaling Matrix
