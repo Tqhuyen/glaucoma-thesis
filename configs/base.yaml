@@ -1,0 +1,55 @@
+run_name: "distilbert-agnews-v1"
+seed: 42
+
+model:
+  type: "nlp"
+  name: "distilbert-base-uncased"
+  num_labels: 4
+
+hf:
+  use_auth: true
+  fast_transfer: true
+
+data:
+  dataset: "ag_news"
+  text_column: "text"
+  label_column: "label"
+  max_length: 256
+  val_fraction: 0.05
+  test_split: "test"
+  num_proc: auto
+  num_workers: auto
+  prefetch_factor: 4
+
+train:
+  epochs: 3
+  batch_size: 32
+  grad_accum_steps: 1
+  lr: 3.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  max_grad_norm: 1.0
+  amp: true
+  compile: false
+  log_every_steps: 50
+  eval_every_steps: 500
+  save_every_steps: 500
+  keep_last_checkpoints: 2
+  early_stop_patience: 3
+
+logging:
+  tensorboard: true
+  jsonl: true
+  wandb: false
+  wandb_project: "everfit-training"
+
+output_dir: "outputs"
+
+smoke:
+  max_train_samples: 128
+  max_val_samples: 64
+  epochs: 1
+  batch_size: 8
+  log_every_steps: 1
+  eval_every_steps: 8
+  save_every_steps: 8

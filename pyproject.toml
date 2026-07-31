@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glaucoma-thesis"
+version = "0.1.0"
+description = "Master thesis: 3D CNN glaucoma classification with enterprise training pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "tensorboard>=2.14",
+    "datasets>=2.14",
+    "hf-transfer>=0.1",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+nlp = ["transformers>=4.34", "accelerate>=0.24"]
+glaucoma = []
+dev = ["pytest>=7.4", "ruff>=0.1"]
+all = [
+    "transformers>=4.34",
+    "accelerate>=0.24",
+    "pytest>=7.4",
+    "ruff>=0.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["pipeline*", "models*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501", "E402"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,51 @@
+run_name: "glaucoma-3dcnn-128"
+seed: 42
+
+model:
+  type: "glaucoma"
+  architecture: "simple3dcnn"
+  input_channels: 1
+  num_classes: 2
+  dropout: 0.3
+
+data:
+  data_dir: "glaucoma_all_128"
+  cache_in_ram: false
+  num_workers: auto
+
+train:
+  epochs: 30
+  batch_size: 2
+  grad_accum_steps: 2
+  lr: 1.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  amp: true
+  compile: false
+  log_every_steps: 10
+  eval_every_steps: 100
+  save_every_steps: 500
+  keep_last_checkpoints: 2
+  early_stop_patience: 5
+
+logging:
+  tensorboard: true
+  jsonl: true
+  wandb: false
+  wandb_project: "glaucoma-thesis"
+
+output_dir: "outputs"
+
+smoke:
+  max_train_samples: 32
+  max_val_samples: 16
+  epochs: 1
+  batch_size: 2
+  log_every_steps: 1
+  eval_every_steps: 4
+  save_every_steps: 4
+
+hf:
+  use_auth: true
+  fast_transfer: true
