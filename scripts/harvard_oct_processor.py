@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """
-Harvard OCT B-Scan Dataset Processor — Standalone Script (no browser needed).
-
-Downloads all three Harvard Ophthalmology AI Lab OCT B-scan datasets from
-Hugging Face, extracts only `oct_bscans` + `glaucoma` label (stripping
-demographics, fundus images, RNFLT maps), and pushes a unified compressed
-dataset back to HF Hub as one combined repo.
+Harvard OCT B-Scan Dataset Processor — Streaming (low-RAM), additive uploads.
+Processes three Harvard Ophthalmology AI Lab datasets one at a time, uploading
+each incrementally to HF Hub to keep peak disk usage < 60 GB.
 
 Usage:
     export HF_TOKEN=hf_xxx
     python scripts/harvard_oct_processor.py
-
-Runtime: ~2-4 hours depending on bandwidth.
-Disk:  ~80 GB peak (one dataset at a time).
 """
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import os
@@ -31,280 +26,231 @@ import pandas as pd
 from huggingface_hub import HfApi, create_repo, hf_hub_download, upload_folder
 from tqdm.auto import tqdm
 
-# ── config ────────────────────────────────────────────────────────────
-HF_TOKEN = os.environ.get("HF_TOKEN")
+# ── config ──────────────────────────────────────────────────────────────────
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 if not HF_TOKEN:
-    HUGGING_FACE_HUB_TOKEN = os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    if HUGGING_FACE_HUB_TOKEN:
-        HF_TOKEN = HUGGING_FACE_HUB_TOKEN
-        os.environ["HF_TOKEN"] = HF_TOKEN
-    else:
-        print("ERROR: HF_TOKEN environment variable not set.")
-        print("       export HF_TOKEN=hf_xxx")
-        sys.exit(1)
+    print("ERROR: HF_TOKEN not set.", flush=True)
+    sys.exit(1)
 
 api = HfApi(token=HF_TOKEN)
 HF_USER = api.whoami()["name"]
 OUTPUT_REPO = f"{HF_USER}/harvard-oct-glaucoma-200"
-WORK_DIR = Path(__file__).resolve().parent.parent / "data" / "harvard_oct_work"
-os.makedirs(WORK_DIR, exist_ok=True)
+
+WORK_DIR = Path(os.environ.get("WORK_DIR", "/content/harvard_oct_work"))
+STAGING = WORK_DIR / "staging"
+STAGING.mkdir(parents=True, exist_ok=True)
 
 random.seed(42)
 np.random.seed(42)
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
-print(f"HF User:  {HF_USER}")
-print(f"Output:   {OUTPUT_REPO}")
-print(f"Work dir: {WORK_DIR}")
-print(f"HF Hub:   https://huggingface.co/datasets/{OUTPUT_REPO}")
-print()
+print(f"HF: {HF_USER}  |  Output: {OUTPUT_REPO}  |  Disk free: {shutil.disk_usage(STAGING).free/1e9:.1f} GB", flush=True)
 
-# ── helpers ──────────────────────────────────────────────────────────
+# ── state ───────────────────────────────────────────────────────────────────
+manifest_path = WORK_DIR / "manifest.jsonl"
+MANIFEST: list[dict] = []
+UPLOAD_COUNT = 0
+
+def flush_manifest():
+    with open(manifest_path, "w") as f:
+        for e in MANIFEST:
+            f.write(json.dumps(e) + "\n")
+
+# ── helpers ─────────────────────────────────────────────────────────────────
+
+def save_scan(sample_id: str, oct_bscans: np.ndarray, glaucoma: int, split: str) -> str:
+    rel = f"{split}/{sample_id}.npy.gz"
+    fp = STAGING / rel
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_bytes(gzip.compress(oct_bscans.astype(np.uint8).tobytes(), compresslevel=1))
+    MANIFEST.append({"file": rel, "glaucoma": glaucoma, "split": split, "shape": list(oct_bscans.shape)})
+    return rel
+
+
 def download_zip(repo_id: str, filepath: str) -> Path:
-    """Download a zip from HF Hub, cache in WORK_DIR."""
-    local = WORK_DIR / f"{repo_id.replace('/', '_')}_{Path(filepath).name}"
+    name = f"{repo_id.replace('/', '_')}_{Path(filepath).name}"
+    local = WORK_DIR / name
     if local.exists():
-        print(f"  Using cached: {local}")
+        print(f"  [cached] {name}", flush=True)
         return local
-    print(f"  Downloading {repo_id}/{filepath} ...")
+    print(f"  downloading {repo_id}/{filepath} ...", flush=True)
     t0 = time.time()
-    downloaded = hf_hub_download(repo_id=repo_id, filename=filepath, repo_type="dataset")
-    # Copy to work dir for isolation
-    shutil.copy(downloaded, local)
-    print(f"  Done in {(time.time() - t0) / 60:.1f} min ({local.stat().st_size / 1e9:.1f} GB)")
+    dl = hf_hub_download(repo_id=repo_id, filename=filepath, repo_type="dataset")
+    shutil.copy(dl, local)
+    gb = local.stat().st_size / 1e9
+    print(f"  done in {(time.time()-t0)/60:.1f}m ({gb:.1f} GB)", flush=True)
     return local
 
 
-def extract_npz_zip(zip_path: Path, label_map: dict, out_dir: Path) -> tuple[int, int]:
-    """Open a .zip, for each .npz extract oct_bscans + glaucoma, save as .npz."""
-    os.makedirs(out_dir, exist_ok=True)
-    count, errors = 0, 0
+def extract_from_zip(zip_path: Path, label_map: dict, split_map: dict, desc: str = ""):
+    count, errors, skipped = 0, 0, 0
     with zipfile.ZipFile(str(zip_path), "r") as zf:
-        npz_names = sorted(n for n in zf.namelist() if n.endswith(".npz"))
-        for name in tqdm(npz_names, desc=f"  {out_dir.name}"):
+        names = sorted(n for n in zf.namelist() if n.endswith(".npz"))
+        for name in tqdm(names, desc=desc):
             try:
                 raw = np.load(io.BytesIO(zf.read(name)), allow_pickle=True)
-                oct_scan = np.asarray(raw["oct_bscans"], dtype=np.uint8)
+                scan = np.asarray(raw["oct_bscans"], dtype=np.uint8)
                 label = label_map.get(name, -1)
-                np.savez_compressed(str(out_dir / name), oct_bscans=oct_scan, glaucoma=label)
+                split = split_map.get(name, "")
+                if split not in ("train", "val", "test"):
+                    skipped += 1
+                    continue
+                save_scan(Path(name).stem, scan, label, split)
                 count += 1
             except Exception as e:
                 errors += 1
                 if errors <= 3:
-                    print(f"  [WARN] {name}: {e}")
-    return count, errors
+                    print(f"  [WARN] {name}: {e}", flush=True)
+    print(f"  saved={count}  skipped={skipped}  errors={errors}", flush=True)
 
 
-def load_split_csv(repo_id: str, csv_path: str) -> dict:
-    """Download CSV and return {filename: split} mapping."""
-    local = hf_hub_download(repo_id=repo_id, filename=csv_path, repo_type="dataset")
-    df = pd.read_csv(local)
-    if "use" in df.columns:
-        mapping = dict(zip(df["filename"], df["use"]))
-        # Normalize split names
-        norm = {"training": "train", "validation": "val", "test": "test"}
-        return {k: norm.get(v, "train") for k, v in mapping.items()}
-    return {}
+def load_csv(repo_id: str, path: str, col: str) -> dict:
+    f = hf_hub_download(repo_id=repo_id, filename=path, repo_type="dataset")
+    df = pd.read_csv(f)
+    if "filename" not in df.columns or col not in df.columns:
+        return {}
+    return dict(zip(df["filename"].astype(str), df[col].astype(str)))
 
 
-def load_label_csv(repo_id: str, csv_path: str) -> dict:
-    local = hf_hub_download(repo_id=repo_id, filename=csv_path, repo_type="dataset")
-    df = pd.read_csv(local)
-    return dict(zip(df["filename"], df["glaucoma"].map({"yes": 1, "no": 0})))
+def label_map(repo_id: str, csv_path: str) -> dict:
+    raw = load_csv(repo_id, csv_path, "glaucoma")
+    return {f: 1 if str(v).strip().lower() in ("yes","1","true") else 0 for f, v in raw.items()}
 
 
-# ======================================================================
-# STEP 1: Download + Extract all three datasets
-# ======================================================================
-
-all_scans = {"train": [], "val": [], "test": []}
-all_labels = {"train": [], "val": [], "test": []}
+def split_map(data: dict) -> dict:
+    n = {"training": "train", "validation": "val", "test": "test",
+         "valid": "val", "testing": "test"}
+    return {k: n.get(v.lower().strip(), v.lower().strip()) for k, v in data.items()}
 
 
-def add_extracted(source_dir: str, split_map: dict, label_map: dict):
-    """Load extracted .npz files into all_scans by split."""
-    base = Path(source_dir)
-    npz_files = list(base.rglob("*.npz"))
-    print(f"  Loading {len(npz_files)} files ...")
-    for npz_path in tqdm(npz_files, desc=f"  {Path(source_dir).name}"):
-        try:
-            data = dict(np.load(npz_path, allow_pickle=True))
-            scan = np.asarray(data["oct_bscans"], dtype=np.uint8)
-            label = int(data["glaucoma"])
-            fname = npz_path.name
-            split = split_map.get(fname, "train") if split_map else "pool"
-            if split == "pool":
-                continue
-            all_scans[split].append(scan)
-            all_labels[split].append(label)
-        except Exception:
-            pass
+def split_random(files: list[str]) -> dict:
+    s = sorted(files); random.shuffle(s)
+    n, nt, nv = len(s), int(len(s)*0.7), int(len(s)*0.1)
+    return {f: "train" for f in s[:nt]} | \
+           {f: "val"   for f in s[nt:nt+nv]} | \
+           {f: "test"  for f in s[nt+nv:]}
 
 
-# ── Harvard-GF ──────────────────────────────────────────────────────
-print("=" * 60)
-print("  Harvard-GF (3,300 samples)")
-print("=" * 60)
-gf_labels = load_label_csv("harvardairobotics/Harvard-GF", "ReadMe/data_summary.csv")
-gf_splits = load_split_csv("harvardairobotics/Harvard-GF", "ReadMe/data_summary.csv")
-gf_zip = download_zip("harvardairobotics/Harvard-GF", "Dataset/dataset.zip")
-gf_out = WORK_DIR / "harvard_gf_extracted"
-gf_n, gf_err = extract_npz_zip(gf_zip, gf_labels, gf_out)
-print(f"  Extracted: {gf_n} files, {gf_err} errors")
-add_extracted(str(gf_out), gf_splits, gf_labels)
+def upload_and_clear(dataset_name: str):
+    """Upload current STAGING to HF Hub, then clear staging (but not manifest)."""
+    global UPLOAD_COUNT
+    flush_manifest()
+    shutil.copy(manifest_path, STAGING / "manifest.jsonl")
+    upload_folder(repo_id=OUTPUT_REPO, folder_path=str(STAGING), repo_type="dataset",
+                  commit_message=f"[{dataset_name}] {len(list(STAGING.rglob('*.npy.gz')))} scans")
+    UPLOAD_COUNT += 1
+    for f in STAGING.rglob("*"):
+        if f.is_file():
+            f.unlink()
+    for d in sorted(STAGING.rglob("*"), reverse=True):
+        if d.is_dir() and d != STAGING:
+            try: d.rmdir()
+            except: pass
+    print(f"  uploaded + cleared (commit #{UPLOAD_COUNT})", flush=True)
 
-# ── FairFedMed-Oph ──────────────────────────────────────────────────
-print()
-print("=" * 60)
-print("  FairFedMed-Oph (15,165 samples)")
-print("=" * 60)
-ffm_labels = load_label_csv("harvardairobotics/FairFedMed", "FairFedMed-Oph/ReadMe/data_summary.csv")
-ffm_zip = download_zip("harvardairobotics/FairFedMed", "FairFedMed-Oph/Dataset/dataset.zip")
-ffm_out = WORK_DIR / "fairfedmed_extracted"
-ffm_n, ffm_err = extract_npz_zip(ffm_zip, ffm_labels, ffm_out)
-print(f"  Extracted: {ffm_n} files, {ffm_err} errors")
 
-# FairFedMed has no splits → shuffle and split 70/10/20
-print("  Splitting 70/10/20 ...")
-ffm_scans, ffm_lbls = [], []
-for npz_path in tqdm(list(Path(ffm_out).glob("*.npz")), desc="  FairFedMed"):
-    try:
-        d = dict(np.load(npz_path, allow_pickle=True))
-        ffm_scans.append(np.asarray(d["oct_bscans"], dtype=np.uint8))
-        ffm_lbls.append(int(d["glaucoma"]))
-    except Exception:
-        pass
-
-combined = list(zip(ffm_scans, ffm_lbls))
-random.shuffle(combined)
-n = len(combined)
-n_tr, n_vl = int(n * 0.7), int(n * 0.1)
-print(f"  Total: {n}, train={n_tr}, val={n_vl}, test={n - n_tr - n_vl}")
-
-for scan, lbl in combined[:n_tr]:
-    all_scans["train"].append(scan)
-    all_labels["train"].append(lbl)
-for scan, lbl in combined[n_tr : n_tr + n_vl]:
-    all_scans["val"].append(scan)
-    all_labels["val"].append(lbl)
-for scan, lbl in combined[n_tr + n_vl :]:
-    all_scans["test"].append(scan)
-    all_labels["test"].append(lbl)
-
-# ── FairGenMed ──────────────────────────────────────────────────────
-print()
-print("=" * 60)
-print("  FairGenMed (10,052 samples)")
-print("=" * 60)
-fgm_labels = load_label_csv("harvardairobotics/FairGenMed", "ReadMe/data_summary.csv")
-fgm_splits = load_split_csv("harvardairobotics/FairGenMed", "ReadMe/data_summary.csv")
-
-for split_dir, split_name in [("Training", "training"), ("Validation", "validation"), ("Test", "test")]:
-    print(f"  [{split_name}]")
-    zfile = f"Dataset/{split_dir}/NPZ.zip"
-    fgm_zip = download_zip("harvardairobotics/FairGenMed", zfile)
-    fgm_out = WORK_DIR / f"fairgenmed_{split_name}"
-    n_files, n_err = extract_npz_zip(fgm_zip, fgm_labels, fgm_out)
-    print(f"    Extracted: {n_files} files, {n_err} errors")
-
-add_extracted(str(WORK_DIR / "fairgenmed_training"), fgm_splits, fgm_labels)
-add_extracted(str(WORK_DIR / "fairgenmed_validation"), fgm_splits, fgm_labels)
-add_extracted(str(WORK_DIR / "fairgenmed_test"), fgm_splits, fgm_labels)
-
-# ======================================================================
-# STEP 2: Summary
-# ======================================================================
-print()
-print("=" * 60)
-print("  Combined Dataset Summary")
-print("=" * 60)
-print(f"{'Split':<10} {'Samples':<12} {'Glaucoma+':<12} {'%':<8}")
-print("-" * 44)
-grand = 0
-for split in ["train", "val", "test"]:
-    n_tot = len(all_scans[split])
-    n_gl = sum(1 for l in all_labels[split] if l == 1)
-    grand += n_tot
-    pct = n_gl / n_tot * 100 if n_tot else 0
-    print(f"{split:<10} {n_tot:<12} {n_gl:<12} {pct:.1f}%")
-print("-" * 44)
-print(f"{'TOTAL':<10} {grand}")
-
-# ======================================================================
-# STEP 3: Save unified dataset
-# ======================================================================
-print()
-print("=" * 60)
-print("  Saving unified .npz files")
-print("=" * 60)
-
-upload_dir = WORK_DIR / "unified"
-os.makedirs(upload_dir, exist_ok=True)
-
-for split_name in ["train", "val", "test"]:
-    scans = all_scans[split_name]
-    labels = all_labels[split_name]
-    if not scans:
-        continue
-
-    X = np.stack(scans, axis=0)
-    y = np.array(labels, dtype=np.int16)
-
-    out_path = upload_dir / f"{split_name}_volumes.npz"
-    print(f"  {split_name}: X={X.shape} y={y.shape} ... ", end="", flush=True)
-    np.savez_compressed(out_path, oct_bscans=X, glaucoma=y)
-    print(f"{out_path.stat().st_size / 1e9:.2f} GB")
-
-manifest = {
-    "description": "Unified Harvard OCT B-scan dataset (200x200x200) for glaucoma classification",
-    "total_samples": grand,
-    "resolution": [200, 200, 200],
-    "dtype": "uint8",
-    "channels": 1,
-    "classes": {"0": "no_glaucoma", "1": "glaucoma"},
-    "source_datasets": [
-        "harvardairobotics/Harvard-GF",
-        "harvardairobotics/FairFedMed (Oph subset)",
-        "harvardairobotics/FairGenMed",
-    ],
-    "license": "cc-by-nc-nd-4.0",
-    "splits": {},
-}
-for s in ["train", "val", "test"]:
-    if all_scans[s]:
-        manifest["splits"][s] = {
-            "samples": len(all_scans[s]),
-            "glaucoma_positive": int(sum(1 for l in all_labels[s] if l == 1)),
-            "file": f"{s}_volumes.npz",
-        }
-
-with open(upload_dir / "manifest.json", "w") as f:
-    json.dump(manifest, f, indent=2)
-
-total_upload = sum(f.stat().st_size for f in upload_dir.glob("*.npz"))
-print(f"\n  Total upload size: {total_upload / 1e9:.1f} GB")
-
-# ======================================================================
-# STEP 4: Push to HF Hub
-# ======================================================================
-print()
-print("=" * 60)
-print(f"  Uploading to https://huggingface.co/datasets/{OUTPUT_REPO}")
-print("=" * 60)
-
+# ==============================================================================
+# STEP 0: Create HF repo
+# ==============================================================================
 create_repo(repo_id=OUTPUT_REPO, repo_type="dataset", private=False, exist_ok=True)
-upload_folder(
-    repo_id=OUTPUT_REPO,
-    folder_path=str(upload_dir),
-    repo_type="dataset",
-    commit_message="Add unified Harvard OCT B-scans dataset (200x200x200, 3 sources combined)",
-)
 
-print()
-print(f"  Done! Dataset at: https://huggingface.co/datasets/{OUTPUT_REPO}")
-print(f"  Load with: datasets.load_dataset('{OUTPUT_REPO}')")
+# ==============================================================================
+# STEP 1: Harvard-GF
+# ==============================================================================
+print("\n" + "=" * 54, flush=True)
+print("  [1/3] Harvard-GF  (3,300 samples)", flush=True)
+print("=" * 54, flush=True)
 
-# Cleanup work dir
-print(f"\n  Cleaning up work dir ({WORK_DIR}) ...")
+gf_labels = label_map("harvardairobotics/Harvard-GF", "ReadMe/data_summary.csv")
+gf_splits = split_map(load_csv("harvardairobotics/Harvard-GF", "ReadMe/data_summary.csv", "use"))
+gf_zip = download_zip("harvardairobotics/Harvard-GF", "Dataset/dataset.zip")
+extract_from_zip(gf_zip, gf_labels, gf_splits, desc="  Harvard-GF")
+gf_zip.unlink(missing_ok=True)
+print(f"  disk free: {shutil.disk_usage(STAGING).free/1e9:.1f} GB", flush=True)
+upload_and_clear("Harvard-GF")
+
+# ==============================================================================
+# STEP 2: FairFedMed-Oph
+# ==============================================================================
+print("\n" + "=" * 54, flush=True)
+print("  [2/3] FairFedMed-Oph  (15,165 samples)", flush=True)
+print("=" * 54, flush=True)
+
+ffm_labels = label_map("harvardairobotics/FairFedMed", "FairFedMed-Oph/ReadMe/data_summary.csv")
+ffm_zip = download_zip("harvardairobotics/FairFedMed", "FairFedMed-Oph/Dataset/dataset.zip")
+with zipfile.ZipFile(str(ffm_zip), "r") as zf:
+    ffm_files = sorted(n for n in zf.namelist() if n.endswith(".npz"))
+ffm_splits = split_random(ffm_files)
+extract_from_zip(ffm_zip, ffm_labels, ffm_splits, desc="  FairFedMed")
+ffm_zip.unlink(missing_ok=True)
+print(f"  disk free: {shutil.disk_usage(STAGING).free/1e9:.1f} GB", flush=True)
+upload_and_clear("FairFedMed-Oph")
+
+# ==============================================================================
+# STEP 3: FairGenMed
+# ==============================================================================
+print("\n" + "=" * 54, flush=True)
+print("  [3/3] FairGenMed  (10,052 samples)", flush=True)
+print("=" * 54, flush=True)
+
+fgm_labels = label_map("harvardairobotics/FairGenMed", "ReadMe/data_summary.csv")
+fgm_splits = split_map(load_csv("harvardairobotics/FairGenMed", "ReadMe/data_summary.csv", "use"))
+
+for sd, sn in [("Training", "train"), ("Validation", "val"), ("Test", "test")]:
+    zf = download_zip("harvardairobotics/FairGenMed", f"Dataset/{sd}/NPZ.zip")
+    extract_from_zip(zf, fgm_labels, fgm_splits, desc=f"  FairGenMed-{sn}")
+    zf.unlink(missing_ok=True)
+print(f"  disk free: {shutil.disk_usage(STAGING).free/1e9:.1f} GB", flush=True)
+upload_and_clear("FairGenMed")
+
+# ==============================================================================
+# FINAL: manifest + README
+# ==============================================================================
+flush_manifest()
+
+sc: dict = {}; sg: dict = {}
+for e in MANIFEST:
+    s = e["split"]
+    sc[s] = sc.get(s, 0) + 1
+    if e["glaucoma"] == 1:
+        sg[s] = sg.get(s, 0) + 1
+total = sum(sc.values())
+
+print("\n" + "=" * 54, flush=True)
+print(f"  TOTAL: {total} scans  |  train={sc.get('train',0)}  val={sc.get('val',0)}  test={sc.get('test',0)}", flush=True)
+for s in ("train", "val", "test"):
+    n = sc.get(s, 0); g = sg.get(s, 0)
+    print(f"  {s}: {n} scans, {g} glau+ ({g/n*100:.1f}%)" if n else f"  {s}: 0", flush=True)
+print("=" * 54, flush=True)
+
+readme = f"""---
+license: cc-by-nc-nd-4.0
+task_categories: [image-classification]
+tags: [ophthalmology, oct, glaucoma, medical-imaging]
+pretty_name: Harvard OCT Glaucoma B-scans (200³)
+size_categories: [10K<n<100K]
+---
+
+# Harvard OCT Glaucoma B-scans (200³)
+{total} samples, {sc.get('train',0)} train / {sc.get('val',0)} val / {sc.get('test',0)} test.
+200×200×200 uint8 volumes, individually gzip-compressed.
+
+## Sources
+- [Harvard-GF](https://huggingface.co/datasets/harvardairobotics/Harvard-GF) (3,300)
+- [FairFedMed-Oph](https://huggingface.co/datasets/harvardairobotics/FairFedMed) (15,165)
+- [FairGenMed](https://huggingface.co/datasets/harvardairobotics/FairGenMed) (10,052)
+
+## Usage
+```python
+from datasets import load_dataset
+ds = load_dataset("{HF_USER}/harvard-oct-glaucoma-200")
+```
+"""
+(STAGING / "README.md").write_text(readme)
+shutil.copy(manifest_path, STAGING / "manifest.jsonl")
+
+upload_folder(repo_id=OUTPUT_REPO, folder_path=str(STAGING), repo_type="dataset",
+              commit_message=f"FINAL: {total} Harvard OCT B-scans, 3 sources")
+
+print(f"\n  Done!  https://huggingface.co/datasets/{OUTPUT_REPO}", flush=True)
 shutil.rmtree(WORK_DIR, ignore_errors=True)
-print("  Done. All temp files removed.")
