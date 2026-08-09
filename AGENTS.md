@@ -105,7 +105,7 @@ config.yaml → validate_config (fast fail) → build loaders → build model
   `loss`, `acc`, `precision`, `recall`, `f1` (+ `_pos` = class-1/glaucoma-positive),
   plus `sys/cpu_percent`, `sys/ram_used_gb`, `sys/ram_percent`, `sys/disk_free_gb`,
   `sys/gpu_*` (when CUDA).
-- **W&B** (optional): `logging.wandb: true`, project `glaucoma-thesis`.
+- **W&B** (MANDATORY — every run/experiment must log to it): project `glaucoma-thesis`.
   - Same keys as JSONL, logged live every `log_every_steps` + each eval.
   - GPU/CPU/RAM/disk auto-tracked by wandb's System panel; `sys/*` metrics also
     logged explicitly.
@@ -115,6 +115,20 @@ config.yaml → validate_config (fast fail) → build loaders → build model
 - **Drive sync**: `logging.drive_sync_dir: "/content/drive/MyDrive/..."` copies
   `training_curves.png` + `metrics.jsonl` + `best_model.pt` after each run
   (`pipeline/plotting.py`).
+
+### W&B mandatory process (do this in EVERY experiment)
+1. **Set the key** — `.env` `WANDB_API_KEY=wandb_xxx` (repo root, gitignored) or
+   Colab Secrets `WANDB_API_KEY`. Run `python -c "from pipeline.utils import load_env_file; load_env_file()"`
+   or just start any run — the pipeline auto-loads it.
+2. **Pipeline runs** (`pipeline/train.py`): `logging.wandb: true` in the config is
+   already on. Every run creates a run named `run_name` in project `glaucoma-thesis`
+   and streams train/val/test `loss/acc/precision/recall/f1` + `sys/*` live.
+3. **Notebooks** (`notebooks/*.ipynb`): every notebook MUST include the wandb
+   mount-cell helper (`init_wandb(run_name, config)` + `WANDB_RUN`), init before
+   training, `run.log({...}, step=...)` per epoch/step for train+val, log test at
+   the end, then `run.summary.update(...)` + `run.finish()`. If a new notebook is
+   added without this, it is NOT done.
+4. **Never** disable or drop wandb to "save time" — it is the live experiment log.
 
 ### Notebook conventions
 - Notebooks are standalone Colab experiments (inline code, `!pip`/`!git` cells).
