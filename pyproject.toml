@@ -15,6 +15,9 @@ dependencies = [
     "datasets>=2.14",
     "hf-transfer>=0.1",
     "tqdm>=4.65",
+    "matplotlib>=3.7",
+    "wandb>=0.17",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

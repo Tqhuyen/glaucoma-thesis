@@ -1,7 +1,7 @@
 """Enterprise training loop: model-agnostic. single GPU -> multi-GPU -> multi-node.
 
 Launch matrix:
-    1 GPU / CPU:      python -m pipeline.train --cfg configs/glaucoma_96.yaml
+    1 GPU / CPU:      python -m pipeline.train --cfg configs/glaucoma.yaml
     N GPUs, 1 node:   torchrun --standalone --nproc_per_node=N -m pipeline.train --cfg ...
     Multi-node:       torchrun --nnodes=$N --node_rank=$R --master_addr=$ADDR --master_port=29500 ...
     SLURM cluster:    sbatch scripts/slurm_train.sbatch
@@ -35,11 +35,13 @@ from .distributed import (
     setup_distributed,
 )
 from .metrics import MetricsLogger
+from .plotting import render_and_sync
 from .utils import (
     atomic_save,
     detect_environment,
     latest_checkpoint,
     load_config,
+    load_env_file,
     prune_checkpoints,
     resolve_amp_dtype,
     seed_everything,
@@ -60,9 +62,37 @@ def parse_args():
     p.add_argument("--cfg", required=True)
     p.add_argument("--set", nargs="*", default=[], help="Override config: key.subkey=value")
     p.add_argument("--smoke", action="store_true")
+    p.add_argument("--sanity", action="store_true", help="Overfit N samples (cfg.sanity) — debug if code/arch can learn at all")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--output-dir", default=None)
     return p.parse_args()
+
+
+def apply_profile(cfg, args):
+    """Apply smoke / sanity training profiles to the config.
+
+    smoke  -> tiny run that validates the pipeline end-to-end quickly.
+    sanity -> overfit `max_train_samples` (default 10) for `epochs` (default 100)
+              with dropout=0, weight_decay=0, warmup=0 and no eval/save.
+              Loss must approach ~0; if it doesn't, the bug is in code/arch/data.
+    """
+    if args.smoke:
+        for k in ("epochs", "batch_size", "log_every_steps", "eval_every_steps", "save_every_steps"):
+            cfg["train"][k] = cfg["smoke"][k]
+        cfg["train"]["eval_test_every_steps"] = cfg["smoke"].get("eval_test_every_steps", 10**9)
+    if args.sanity:
+        s = cfg.get("sanity", {})
+        for k in ("epochs", "batch_size", "log_every_steps", "eval_every_steps", "save_every_steps"):
+            cfg["train"][k] = s.get(k, cfg["train"].get(k))
+        cfg["train"].update(
+            eval_test_every_steps=10**9,
+            weight_decay=0.0,
+            warmup_ratio=0.0,
+            grad_accum_steps=1,
+            early_stop_patience=10**9,
+        )
+        cfg["model"]["dropout"] = 0.0
+        print("[sanity] overfit mode: dropout=0, wd=0, warmup=0, eval/save off")
 
 
 def build_scheduler(optimizer, total_steps, tcfg):
@@ -106,10 +136,13 @@ def evaluate_sharded(model, loader, device, amp_dtype):
 
     loss_sum, correct, n = reduce_sum(loss_sum), reduce_sum(correct), reduce_sum(n)
     model.train()
+    if n.item() == 0:
+        return float("nan"), 0.0
     return (loss_sum / n).item(), (correct / n).item()
 
 
 def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps):
+    """Returns (scaled_loss, batch_accuracy) so train/acc can be tracked live."""
     if isinstance(batch, (tuple, list)):
         x, y = batch
         x = x.to(device, non_blocking=True)
@@ -117,6 +150,7 @@ def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps):
         with torch.autocast(device.type, dtype=amp_dtype, enabled=amp_dtype is not None):
             out = model(x)
             loss = criterion(out["logits"], y)
+            acc = (out["logits"].argmax(-1) == y).float().mean()
     else:
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with torch.autocast(device.type, dtype=amp_dtype, enabled=amp_dtype is not None):
@@ -125,18 +159,18 @@ def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps):
                 loss = out.loss
             else:
                 loss = criterion(out["logits"], batch["labels"])
-    return loss / grad_accum_steps
+            acc = (out["logits"].argmax(-1) == batch["labels"]).float().mean()
+    return loss / grad_accum_steps, acc.detach()
 
 
 def main():
     from models import get_dataloader_builder, get_model_builder
 
     args = parse_args()
+    load_env_file()
     cfg = load_config(args.cfg, args.set)
     validate_config(cfg)
-    if args.smoke:
-        for k in ("epochs", "batch_size", "log_every_steps", "eval_every_steps", "save_every_steps"):
-            cfg["train"][k] = cfg["smoke"][k]
+    apply_profile(cfg, args)
 
     rank, local_rank, world_size = setup_distributed()
     main_proc = is_main(rank)
@@ -178,6 +212,15 @@ def main():
         )
 
     train_loader, val_loader, test_loader = build_loaders_fn(cfg, smoke=args.smoke)
+
+    if args.sanity:
+        n = cfg.get("sanity", {}).get("max_train_samples", 10)
+        train_loader.dataset.labels = train_loader.dataset.labels[:n]
+        train_loader.dataset.volumes = train_loader.dataset.volumes[:n]
+        val_loader.dataset.labels = val_loader.dataset.labels[:0]
+        val_loader.dataset.volumes = val_loader.dataset.volumes[:0]
+        if main_proc:
+            print(f"[sanity] overfitting {len(train_loader.dataset)} train samples ({len(val_loader.dataset)} val)")
 
     model = build_model_fn(cfg).to(device)
     if cfg["train"].get("compile", False):
@@ -245,6 +288,8 @@ def main():
     model.train()
     t0 = time.time()
     stop = False
+    running_acc_sum = 0.0
+    running_acc_n = 0
     for epoch in range(start_epoch, tcfg["epochs"]):
         if is_distributed():
             train_loader.sampler.set_epoch(epoch)
@@ -258,7 +303,7 @@ def main():
         optimizer.zero_grad(set_to_none=True)
 
         for i, batch in enumerate(iterable):
-            loss = compute_loss(model, batch, criterion, device, amp_dtype, tcfg["grad_accum_steps"])
+            loss, acc = compute_loss(model, batch, criterion, device, amp_dtype, tcfg["grad_accum_steps"])
 
             if not torch.isfinite(loss):
                 raise RuntimeError(
@@ -267,6 +312,8 @@ def main():
                 )
 
             scaler.scale(loss).backward()
+            running_acc_sum += acc.item()
+            running_acc_n += 1
 
             if (i + 1) % tcfg["grad_accum_steps"] == 0:
                 scaler.unscale_(optimizer)
@@ -280,9 +327,14 @@ def main():
                 if main_proc and global_step % tcfg["log_every_steps"] == 0:
                     lr = scheduler.get_last_lr()[0]
                     step_loss = loss.item() * tcfg["grad_accum_steps"]
-                    log({"train/loss": step_loss, "train/lr": lr}, global_step)
+                    train_acc = running_acc_sum / max(running_acc_n, 1)
+                    running_acc_sum, running_acc_n = 0.0, 0
+                    log(
+                        {"train/loss": step_loss, "train/acc": train_acc, "train/lr": lr},
+                        global_step,
+                    )
                     if hasattr(iterable, "set_postfix"):
-                        iterable.set_postfix(loss=f"{step_loss:.4f}", lr=f"{lr:.2e}")
+                        iterable.set_postfix(loss=f"{step_loss:.4f}", acc=f"{train_acc:.3f}", lr=f"{lr:.2e}")
 
                 if global_step % tcfg["eval_every_steps"] == 0:
                     val_loss, val_acc = evaluate_sharded(model, val_loader, device, amp_dtype)
@@ -298,6 +350,13 @@ def main():
                             if main_proc:
                                 print("[early-stop] no improvement, stopping.")
                             stop = True
+
+                test_every = tcfg.get("eval_test_every_steps", 0)
+                if test_every and test_loader is not None and global_step % test_every == 0:
+                    test_loss, test_acc = evaluate_sharded(model, test_loader, device, amp_dtype)
+                    log({"test/loss": test_loss, "test/acc": test_acc}, global_step)
+                    if main_proc:
+                        print(f"\n[test ] step {global_step}: test_loss={test_loss:.4f} test_acc={test_acc:.4f}")
 
                 if global_step % tcfg["save_every_steps"] == 0:
                     save_ckpt(global_step, epoch)
@@ -315,13 +374,14 @@ def main():
         if stop:
             break
 
-        val_loss, val_acc = evaluate_sharded(model, val_loader, device, amp_dtype)
-        log({"val/loss": val_loss, "val/acc": val_acc}, global_step)
-        if main_proc:
-            print(f"[epoch {epoch}] val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            save_best(global_step)
+        if len(val_loader.dataset) > 0:
+            val_loss, val_acc = evaluate_sharded(model, val_loader, device, amp_dtype)
+            log({"val/loss": val_loss, "val/acc": val_acc}, global_step)
+            if main_proc:
+                print(f"[epoch {epoch}] val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                save_best(global_step)
         save_ckpt(global_step, epoch + 1)
 
     save_ckpt(global_step, tcfg["epochs"])
@@ -337,6 +397,13 @@ def main():
         (out_dir / "test_results.json").write_text(
             json.dumps({"test_loss": test_loss, "test_acc": test_acc, "step": global_step}, indent=2)
         )
+
+    if main_proc:
+        png = render_and_sync(out_dir, cfg)
+        if png:
+            print(f"[plot] saved curves -> {png}")
+        elif logger:
+            print("[plot] nothing to plot yet (no metrics.jsonl) — curves will appear next run.")
 
     if main_proc:
         mins = (time.time() - t0) / 60

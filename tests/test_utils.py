@@ -31,14 +31,14 @@ def test_prune_checkpoints():
 
 
 def test_config_override():
-    cfg = load_config("configs/glaucoma_96.yaml", overrides=["train.lr=0.0005", "run_name=test-override"])
+    cfg = load_config("configs/glaucoma.yaml", overrides=["train.lr=0.0005", "run_name=test-override"])
     assert cfg["train"]["lr"] == 0.0005
     assert cfg["run_name"] == "test-override"
 
 
 def test_config_override_typo():
     try:
-        load_config("configs/glaucoma_96.yaml", overrides=["train.laerning_rate=0.001"])
+        load_config("configs/glaucoma.yaml", overrides=["train.laerning_rate=0.001"])
     except KeyError:
         return
     assert False, "Should have raised KeyError on typo"

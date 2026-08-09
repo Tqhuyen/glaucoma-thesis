@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Colab CLI launcher — one-shot setup & train.
 # Usage: bash scripts/colab_setup.sh <config_name>
-#   config_name = glaucoma_96 | glaucoma_128  (looks up configs/<name>.yaml)
-# Example: bash scripts/colab_setup.sh glaucoma_96
+#   config_name = glaucoma | base  (looks up configs/<name>.yaml)
+# Example: bash scripts/colab_setup.sh glaucoma
 #
 # Before running:
 #   1. Runtime -> Change runtime type -> GPU (T4 minimum for bf16)
@@ -10,7 +10,7 @@
 #      Or: export HF_TOKEN=hf_xxx before running this script
 set -euo pipefail
 
-CFG_NAME="${1:-glaucoma_96}"
+CFG_NAME="${1:-glaucoma}"
 CFG_FILE="configs/${CFG_NAME}.yaml"
 
 if [ ! -f "$CFG_FILE" ]; then

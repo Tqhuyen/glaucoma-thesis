@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # vast.ai launcher — model-agnostic.
 # Usage: bash scripts/vast_setup.sh <config_name> [download|smoke|train|resume]
-#   config_name = base | glaucoma_96 | glaucoma_128  (looks up configs/<name>.yaml)
+#   config_name = glaucoma | base  (looks up configs/<name>.yaml)
 # Example:
-#   bash scripts/vast_setup.sh glaucoma_96 download
-#   bash scripts/vast_setup.sh glaucoma_96 train
+#   bash scripts/vast_setup.sh glaucoma download
+#   bash scripts/vast_setup.sh glaucoma train
 set -euo pipefail
 
 MODEL_CFG="${1:-base}"

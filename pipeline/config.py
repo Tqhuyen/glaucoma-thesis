@@ -49,6 +49,18 @@ _MODEL_SCHEMAS = {
     ],
 }
 
+_OPTIONAL_SCHEMA = [
+    ("train.eval_test_every_steps", (int,), lambda v: v >= 0),
+    ("logging.plot_curves", (bool,), None),
+    ("logging.drive_sync_dir", (str,), None),
+    ("model.dropout", (float, int), lambda v: 0 <= v < 1),
+    ("model.norm", (str,), lambda v: v in ("group", "batch")),
+    ("model.residual", (bool,), None),
+    ("data.normalize", (str,), lambda v: v in ("minmax", "robust", "none")),
+    ("sanity.max_train_samples", (int,), lambda v: v >= 1),
+    ("sanity.epochs", (int,), lambda v: v >= 1),
+]
+
 
 def _get(cfg: dict, dotted: str):
     node = cfg
@@ -70,6 +82,24 @@ def validate_config(cfg: dict) -> None:
             val = _get(cfg, dotted)
         except KeyError:
             errors.append(f"missing key: {dotted}")
+            continue
+        if bool not in types and isinstance(val, bool):
+            errors.append(f"{dotted}: expected {types}, got bool ({val!r})")
+            continue
+        if not isinstance(val, types):
+            errors.append(
+                f"{dotted}: expected {[t.__name__ for t in types]}, "
+                f"got {type(val).__name__} ({val!r})"
+            )
+            continue
+        if check is not None and not check(val):
+            errors.append(f"{dotted}: value {val!r} out of allowed range")
+
+    # Optional keys: validated only when present (old configs / other model types stay valid).
+    for dotted, types, check in _OPTIONAL_SCHEMA:
+        try:
+            val = _get(cfg, dotted)
+        except KeyError:
             continue
         if bool not in types and isinstance(val, bool):
             errors.append(f"{dotted}: expected {types}, got bool ({val!r})")

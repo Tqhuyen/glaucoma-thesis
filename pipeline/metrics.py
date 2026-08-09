@@ -12,9 +12,12 @@ from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
 
+from .utils import load_env_file
+
 
 class MetricsLogger:
     def __init__(self, cfg: dict, out_dir: Path):
+        load_env_file()  # ensures WANDB_API_KEY from .env reaches wandb.init()
         lcfg = cfg.get("logging", {})
         self.tb = SummaryWriter(out_dir / "tb") if lcfg.get("tensorboard", True) else None
 

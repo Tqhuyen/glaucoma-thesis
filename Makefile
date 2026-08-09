@@ -1,4 +1,4 @@
-.PHONY: setup lint test smoke train-nlp train-g96 train-g128 ddp tb
+.PHONY: setup lint test smoke sanity train-nlp train train-g ddp tb plot
 
 setup:
 	pip install -e ".[dev,glaucoma,nlp]"
@@ -11,19 +11,25 @@ test:
 	pytest tests -q
 
 smoke:
-	python -m pipeline.train --cfg configs/glaucoma_96.yaml --smoke --output-dir /tmp/smoke
+	python -m pipeline.train --cfg configs/glaucoma.yaml --smoke --output-dir /tmp/smoke
+
+sanity:
+	python -m pipeline.train --cfg configs/glaucoma.yaml --sanity --output-dir /tmp/sanity
 
 train-nlp:
 	python -m pipeline.train --cfg configs/base.yaml
 
-train-g96:
-	python -m pipeline.train --cfg configs/glaucoma_96.yaml
+train:
+	python -m pipeline.train --cfg configs/glaucoma.yaml
 
-train-g128:
-	python -m pipeline.train --cfg configs/glaucoma_128.yaml
+train-g:
+	python -m pipeline.train --cfg configs/glaucoma.yaml
 
 ddp:
-	bash scripts/launch_ddp.sh configs/glaucoma_96.yaml
+	bash scripts/launch_ddp.sh configs/glaucoma.yaml
 
 tb:
 	tensorboard --logdir outputs --port 6006
+
+plot:
+	python -c "from pathlib import Path; from pipeline.plotting import render_and_sync; import sys; render_and_sync(Path(sys.argv[1]), {'logging': {'plot_curves': True, 'drive_sync_dir': ''}})" $(ARGS)

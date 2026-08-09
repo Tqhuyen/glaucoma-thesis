@@ -11,8 +11,8 @@ One `pipeline/train.py`, four launch commands:
 
 | Hardware | Command |
 |---|---|
-| 1 GPU (Colab, vast.ai, local) | `python -m pipeline.train --cfg configs/glaucoma_96.yaml` |
-| N GPUs, one node | `bash scripts/launch_ddp.sh configs/glaucoma_96.yaml` |
+| 1 GPU (Colab, vast.ai, local) | `python -m pipeline.train --cfg configs/glaucoma.yaml` |
+| N GPUs, one node | `bash scripts/launch_ddp.sh configs/glaucoma.yaml` |
 | Multi-node, manual | `torchrun --nnodes=$N --node_rank=$R --master_addr=$ADDR --nproc_per_node=8 ...` |
 | SLURM cluster | `sbatch scripts/slurm_train.sbatch` |
 
@@ -26,8 +26,8 @@ Effective batch = `batch_size × world_size × grad_accum_steps` — printed at 
 git clone https://github.com/Tqhuyen/glaucoma-thesis.git
 cd glaucoma-thesis
 pip install -e ".[glaucoma]"
-python -m pipeline.train --cfg configs/glaucoma_96.yaml --smoke --output-dir /tmp/smoke
-python -m pipeline.train --cfg configs/glaucoma_96.yaml
+python -m pipeline.train --cfg configs/glaucoma.yaml --smoke --output-dir /tmp/smoke
+python -m pipeline.train --cfg configs/glaucoma.yaml
 ```
 
 ### Google Colab
@@ -45,14 +45,14 @@ os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
 !git clone https://github.com/Tqhuyen/glaucoma-thesis.git
 %cd glaucoma-thesis
 !pip install -q -e ".[glaucoma]"
-!python -m pipeline.train --cfg configs/glaucoma_96.yaml
+!python -m pipeline.train --cfg configs/glaucoma.yaml
 
 # Cell 4: live TensorBoard
 %load_ext tensorboard
 %tensorboard --logdir outputs
 ```
 
-Or one-shot: `bash scripts/colab_setup.sh glaucoma_96`
+Or one-shot: `bash scripts/colab_setup.sh glaucoma`
 
 ### vast.ai
 
@@ -60,16 +60,16 @@ Or one-shot: `bash scripts/colab_setup.sh glaucoma_96`
 # On instance creation (GPU idles, data downloads at full bandwidth):
 git clone https://github.com/Tqhuyen/glaucoma-thesis.git
 cd glaucoma-thesis
-bash scripts/vast_setup.sh glaucoma_96 download
+bash scripts/vast_setup.sh glaucoma download
 
 # Then start training in tmux:
-bash scripts/vast_setup.sh glaucoma_96 train
+bash scripts/vast_setup.sh glaucoma train
 
 # Watch: tmux attach -t train
 # TensorBoard: ssh -L 6006:localhost:6006 ... then http://localhost:6006
 
 # If preempted — resume seamlessly:
-bash scripts/vast_setup.sh glaucoma_96 resume
+bash scripts/vast_setup.sh glaucoma resume
 ```
 
 ### Makefile Shortcuts
@@ -79,10 +79,11 @@ make setup        # install deps + dev tools
 make lint         # ruff check
 make test         # pytest (9 tests)
 make smoke        # CPU smoke train (128 samples, ~2min)
-make train-g96    # full train, 96³ resolution
-make train-g128   # full train, 128³ resolution
+make sanity       # overfit 10 samples — proves code/arch can learn
+make train        # full train on raw 200³ OCT volumes
 make ddp          # all GPUs on this node
 make tb           # TensorBoard at localhost:6006
+make plot         # render training_curves.png from metrics.jsonl
 ```
 
 ## Architecture
@@ -92,7 +93,7 @@ make tb           # TensorBoard at localhost:6006
 This repo uses a **model-agnostic training pipeline** with a registry. Adding a new model requires no changes to `pipeline/train.py` — you only add a module in `models/` and a config YAML.
 
 ```
-configs/glaucoma_96.yaml
+configs/glaucoma.yaml
     model.type: "glaucoma" ─────────┐
                                     ▼
                           models/__init__.py     models/glaucoma/
@@ -139,27 +140,28 @@ pipeline/train.py  ←──  same training loop for ALL model types
 | Validation | 300 | 124 | 176 |
 | Test | 900 | 411 | 489 |
 
-Two resolutions available: **96³** and **128³** (resized from original 200×200×200).
+Raw **200×200×200** OCT volumes (stored as uint8 `.npy`).
 
 ### Model Architecture
 
-`Simple3DCNN`: 4 convolutional layers (16→32→64→128 channels) with BatchNorm, ReLU, and MaxPool3d, followed by AdaptiveAvgPool3d and a classifier head (128→64→2) with dropout.
+`Simple3DCNN`: 4 convolutional blocks (16→32→64→128 channels) with GroupNorm, ReLU, residual connections, and anisotropic MaxPool3d (stride (2,2,1) preserves B-scan depth), followed by AdaptiveAvgPool3d and a classifier head (128→64→2) with dropout.
 
 ```
-Input: (1, S, S, S)   where S = 96 or 128
-  → Conv3d(1→16)  → BN → ReLU → MaxPool3d   (S/2)
-  → Conv3d(16→32) → BN → ReLU → MaxPool3d   (S/4)
-  → Conv3d(32→64) → BN → ReLU → MaxPool3d   (S/8)
-  → Conv3d(64→128)→ BN → ReLU → AdaptiveAvgPool3d(1)
+Input: (1, 200, 200, 200)
+  → Conv3d(1→16)  → GN → ReLU → MaxPool3d((2,2,1))   (100×100×200)
+  → Conv3d(16→32) → GN → ReLU → MaxPool3d((2,2,1))   (50×50×200)
+  → Conv3d(32→64) → GN → ReLU → MaxPool3d((2,2,1))   (25×25×200)
+  → Conv3d(64→128)→ GN → ReLU → AdaptiveAvgPool3d(1)
   → Flatten → Linear(128→64) → ReLU → Dropout(0.3) → Linear(64→2)
 ```
+
+GroupNorm (batch-independent) trains stably at batch_size 2–4; the (2,2,1) pooling keeps full depth resolution so the thin RNFL signal survives to the classifier.
 
 ### Configs
 
 | Config | Resolution | Batch Size | Use Case |
 |---|---|---|---|
-| `configs/glaucoma_96.yaml` | 96³ | 4 | Faster iteration, T4 GPU |
-| `configs/glaucoma_128.yaml` | 128³ | 2 | Higher resolution, V100/A100 |
+| `configs/glaucoma.yaml` | 200³ (raw) | 2 | Full-res training, A100/V100 |
 
 ### Original Thesis Artifacts
 
@@ -238,8 +240,7 @@ glaucoma-thesis/
 │
 ├── configs/
 │   ├── base.yaml                    # NLP example config
-│   ├── glaucoma_96.yaml             # Thesis: 96³
-│   └── glaucoma_128.yaml            # Thesis: 128³
+│   └── glaucoma.yaml                # Thesis: raw 200³ OCT
 │
 ├── scripts/
 │   ├── colab_setup.sh               # One-shot Colab launcher
@@ -304,7 +305,7 @@ glaucoma-thesis/
 | `logging.tensorboard` | bool | TensorBoard scalar logging |
 | `logging.jsonl` | bool | JSONL metrics file |
 | `logging.wandb` | bool | wandb cloud dashboard |
-| `data.cache_in_ram` | bool | Load .npy fully into RAM (96³ fits; 128³ = ~4GB) |
+| `data.cache_in_ram` | bool | Load .npy fully into RAM (200³ = ~26GB total, keep false) |
 | `data.num_workers` | auto/int | DataLoader workers (auto = min(cores, 8)) |
 
 All values overridable from CLI: `--set train.lr=0.0005 train.epochs=50`

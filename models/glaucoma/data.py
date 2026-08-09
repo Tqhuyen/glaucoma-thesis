@@ -5,22 +5,35 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 
+def _robust_stats(volume):
+    """Per-volume percentile clip + z-score (robust to OCT outliers)."""
+    lo, hi = np.percentile(volume, (1, 99))
+    v = np.clip(volume, lo, hi)
+    mu, sd = float(v.mean()), float(v.std()) + 1e-8
+    return v, mu, sd
+
+
 class GlaucomaNpyDataset(Dataset):
-    def __init__(self, data_dir, split, cache_in_ram=False):
+    def __init__(self, data_dir, split, cache_in_ram=False, normalize="minmax"):
         self.labels = np.load(os.path.join(data_dir, f"{split}_labels.npy"))
         vp = os.path.join(data_dir, f"{split}_volumes.npy")
         if cache_in_ram:
             self.volumes = np.load(vp)
         else:
             self.volumes = np.load(vp, mmap_mode="r")
+        self.normalize = normalize
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        x = torch.from_numpy(np.array(self.volumes[idx]))
+        x = np.asarray(self.volumes[idx], dtype=np.float32)
+        if self.normalize == "robust":
+            x, _, _ = _robust_stats(x)
+        elif self.normalize != "none":
+            x = x / 255.0
         y = torch.tensor(int(self.labels[idx]), dtype=torch.long)
-        return x.to(torch.float32) / 255.0, y
+        return torch.from_numpy(np.ascontiguousarray(x)), y
 
 
 def build_dataloaders(cfg, smoke=False):
@@ -30,7 +43,7 @@ def build_dataloaders(cfg, smoke=False):
     data_dir = dcfg.get("data_dir")
     if data_dir is None:
         data_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "glaucoma_all_96"
+            os.path.dirname(__file__), "..", "..", "..", "glaucoma_all"
         )
     data_dir = os.path.normpath(data_dir)
 
@@ -42,9 +55,10 @@ def build_dataloaders(cfg, smoke=False):
     nw = max(2, min(nw, 8))
 
     cache = dcfg.get("cache_in_ram", False)
-    train_ds = GlaucomaNpyDataset(data_dir, "Training", cache_in_ram=cache)
-    val_ds = GlaucomaNpyDataset(data_dir, "Validation", cache_in_ram=cache)
-    test_ds = GlaucomaNpyDataset(data_dir, "Test", cache_in_ram=cache)
+    normalize = dcfg.get("normalize", "minmax")
+    train_ds = GlaucomaNpyDataset(data_dir, "Training", cache_in_ram=cache, normalize=normalize)
+    val_ds = GlaucomaNpyDataset(data_dir, "Validation", cache_in_ram=cache, normalize=normalize)
+    test_ds = GlaucomaNpyDataset(data_dir, "Test", cache_in_ram=cache, normalize=normalize)
 
     if smoke:
         limit = cfg["smoke"]["max_train_samples"]

@@ -26,6 +26,23 @@ def seed_everything(seed: int) -> None:
     torch.backends.cudnn.benchmark = True
 
 
+def load_env_file() -> None:
+    """Load `.env` (repo root) into os.environ if present.
+
+    Populates HF_TOKEN / WANDB_API_KEY from the checked-out `.env` file so the
+    pipeline picks up keys without shell-level `export`. Idempotent and safe:
+    existing environment variables always win.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    for candidate in (Path(__file__).resolve().parents[1] / ".env", Path(".env")):
+        if candidate.exists():
+            load_dotenv(dotenv_path=candidate, override=False)
+            break
+
+
 def seed_worker(worker_id: int) -> None:
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)

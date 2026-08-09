@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Single-node multi-GPU launcher. Auto-detects GPU count.
-# Usage: bash scripts/launch_ddp.sh configs/glaucoma_96.yaml
+# Usage: bash scripts/launch_ddp.sh configs/glaucoma.yaml
 set -euo pipefail
 
-CFG="${1:-configs/glaucoma_96.yaml}"
+CFG="${1:-configs/glaucoma.yaml}"
 NGPU=$(nvidia-smi -L 2>/dev/null | wc -l || echo 1)
 
 echo "Launching DDP with $NGPU GPUs on config $CFG"
