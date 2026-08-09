@@ -171,6 +171,10 @@ Archived in `models/glaucoma/notebooks/`:
 
 Training plots in `models/glaucoma/results/`.
 
+### Experiments
+
+- `notebooks/3d_glaucoma_3dino_experiment.ipynb` — 3DINO-ViT foundation-model transfer (linear probe + head finetune) on raw 200³ OCT. Streams live train/val/test curves to **W&B** (`glaucoma-thesis` project) and saves `training_curves.png` to Drive. Requires `HF_TOKEN` (gated weights) + `WANDB_API_KEY` Colab secrets.
+
 ## Adding a New Model
 
 Three steps, zero changes to `pipeline/train.py`:
