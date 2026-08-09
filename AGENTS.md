@@ -101,9 +101,14 @@ config.yaml → validate_config (fast fail) → build loaders → build model
 
 ### Logging flow (3 sinks + Drive)
 - **TensorBoard**: live, `outputs/<run>/tb` (Colab inline / `make tb`).
-- **JSONL**: `outputs/<run>/metrics.jsonl` — keys `train/loss`, `train/acc`,
-  `val/loss`, `val/acc`, `test/loss`, `test/acc`.
+- **JSONL**: `outputs/<run>/metrics.jsonl` — per split (`train/`, `val/`, `test/`):
+  `loss`, `acc`, `precision`, `recall`, `f1` (+ `_pos` = class-1/glaucoma-positive),
+  plus `sys/cpu_percent`, `sys/ram_used_gb`, `sys/ram_percent`, `sys/disk_free_gb`,
+  `sys/gpu_*` (when CUDA).
 - **W&B** (optional): `logging.wandb: true`, project `glaucoma-thesis`.
+  - Same keys as JSONL, logged live every `log_every_steps` + each eval.
+  - GPU/CPU/RAM/disk auto-tracked by wandb's System panel; `sys/*` metrics also
+    logged explicitly.
   - Key from `.env` (`WANDB_API_KEY`) via `load_env_file()` in
     `pipeline/utils.py` — **always call `load_env_file()` before `wandb.init()`**.
   - `.env` is gitignored; never commit real keys.

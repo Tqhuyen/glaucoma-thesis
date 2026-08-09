@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
@@ -38,12 +39,14 @@ from .metrics import MetricsLogger
 from .plotting import render_and_sync
 from .utils import (
     atomic_save,
+    classification_metrics,
     detect_environment,
     latest_checkpoint,
     load_config,
     load_env_file,
     prune_checkpoints,
     resolve_amp_dtype,
+    sample_system_metrics,
     seed_everything,
     setup_hf_env,
     write_run_manifest,
@@ -105,11 +108,14 @@ def build_scheduler(optimizer, total_steps, tcfg):
 
 
 @torch.no_grad()
-def evaluate_sharded(model, loader, device, amp_dtype):
+def evaluate_sharded(model, loader, device, amp_dtype, num_classes=2):
+    """Eval a loader across all ranks. Returns metrics dict (loss/acc/precision/recall/f1)."""
     model.eval()
     loss_sum = torch.zeros(1, device=device)
     correct = torch.zeros(1, device=device)
     n = torch.zeros(1, device=device)
+    preds_all = []
+    labels_all = []
     criterion = nn.CrossEntropyLoss()
 
     for batch in loader:
@@ -133,16 +139,36 @@ def evaluate_sharded(model, loader, device, amp_dtype):
         loss_sum += loss.detach() * bs
         correct += (preds == y).sum()
         n += bs
+        preds_all.append(preds)
+        labels_all.append(y)
 
     loss_sum, correct, n = reduce_sum(loss_sum), reduce_sum(correct), reduce_sum(n)
     model.train()
     if n.item() == 0:
-        return float("nan"), 0.0
-    return (loss_sum / n).item(), (correct / n).item()
+        return {"loss": float("nan"), "acc": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
+    loss = (loss_sum / n).item()
+    acc = (correct / n).item()
+    if is_distributed():
+        preds_all = [t.contiguous() for t in preds_all]
+        labels_all = [t.contiguous() for t in labels_all]
+        preds_cat = torch.cat(preds_all)
+        labels_cat = torch.cat(labels_all)
+        world = dist.world_size
+        gathered_p = [torch.zeros_like(preds_cat) for _ in range(world)]
+        gathered_l = [torch.zeros_like(labels_cat) for _ in range(world)]
+        dist.all_gather(gathered_p, preds_cat)
+        dist.all_gather(gathered_l, labels_cat)
+        preds_cat = torch.cat(gathered_p)
+        labels_cat = torch.cat(gathered_l)
+    else:
+        preds_cat = torch.cat(preds_all)
+        labels_cat = torch.cat(labels_all)
+    cm = classification_metrics(preds_cat, labels_cat, num_classes=num_classes)
+    return {"loss": loss, "acc": acc, **cm}
 
 
-def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps):
-    """Returns (scaled_loss, batch_accuracy) so train/acc can be tracked live."""
+def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps, num_classes=2):
+    """Returns (scaled_loss, batch_metrics) where metrics = acc/precision/recall/f1."""
     if isinstance(batch, (tuple, list)):
         x, y = batch
         x = x.to(device, non_blocking=True)
@@ -150,7 +176,8 @@ def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps):
         with torch.autocast(device.type, dtype=amp_dtype, enabled=amp_dtype is not None):
             out = model(x)
             loss = criterion(out["logits"], y)
-            acc = (out["logits"].argmax(-1) == y).float().mean()
+        preds = out["logits"].argmax(-1)
+        labels = y
     else:
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with torch.autocast(device.type, dtype=amp_dtype, enabled=amp_dtype is not None):
@@ -159,8 +186,10 @@ def compute_loss(model, batch, criterion, device, amp_dtype, grad_accum_steps):
                 loss = out.loss
             else:
                 loss = criterion(out["logits"], batch["labels"])
-            acc = (out["logits"].argmax(-1) == batch["labels"]).float().mean()
-    return loss / grad_accum_steps, acc.detach()
+        preds = out["logits"].argmax(-1)
+        labels = batch["labels"]
+    cm = classification_metrics(preds, labels, num_classes=num_classes)
+    return loss / grad_accum_steps, cm
 
 
 def main():
@@ -230,6 +259,7 @@ def main():
     raw_model = model.module if isinstance(model, DDP) else model
 
     criterion = nn.CrossEntropyLoss()
+    num_classes = cfg["model"].get("num_classes", 2)
 
     steps_per_epoch = math.ceil(len(train_loader) / tcfg["grad_accum_steps"])
     total_steps = steps_per_epoch * tcfg["epochs"]
@@ -303,7 +333,7 @@ def main():
         optimizer.zero_grad(set_to_none=True)
 
         for i, batch in enumerate(iterable):
-            loss, acc = compute_loss(model, batch, criterion, device, amp_dtype, tcfg["grad_accum_steps"])
+            loss, bm = compute_loss(model, batch, criterion, device, amp_dtype, tcfg["grad_accum_steps"], num_classes)
 
             if not torch.isfinite(loss):
                 raise RuntimeError(
@@ -312,7 +342,7 @@ def main():
                 )
 
             scaler.scale(loss).backward()
-            running_acc_sum += acc.item()
+            running_acc_sum += bm["acc"]
             running_acc_n += 1
 
             if (i + 1) % tcfg["grad_accum_steps"] == 0:
@@ -330,19 +360,28 @@ def main():
                     train_acc = running_acc_sum / max(running_acc_n, 1)
                     running_acc_sum, running_acc_n = 0.0, 0
                     log(
-                        {"train/loss": step_loss, "train/acc": train_acc, "train/lr": lr},
+                        {
+                            "train/loss": step_loss,
+                            "train/acc": train_acc,
+                            "train/precision": bm["precision"],
+                            "train/recall": bm["recall"],
+                            "train/f1": bm["f1"],
+                            "train/lr": lr,
+                            **sample_system_metrics(),
+                        },
                         global_step,
                     )
                     if hasattr(iterable, "set_postfix"):
                         iterable.set_postfix(loss=f"{step_loss:.4f}", acc=f"{train_acc:.3f}", lr=f"{lr:.2e}")
 
                 if global_step % tcfg["eval_every_steps"] == 0:
-                    val_loss, val_acc = evaluate_sharded(model, val_loader, device, amp_dtype)
-                    log({"val/loss": val_loss, "val/acc": val_acc}, global_step)
+                    vm = evaluate_sharded(model, val_loader, device, amp_dtype, num_classes)
+                    log({f"val/{k}": v for k, v in vm.items()}, global_step)
                     if main_proc:
-                        print(f"\n[eval] step {global_step}: val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
-                    if val_loss < best_val_loss:
-                        best_val_loss, evals_since_best = val_loss, 0
+                        print(f"\n[eval] step {global_step}: val_loss={vm['loss']:.4f} val_acc={vm['acc']:.4f} "
+                              f"val_f1={vm['f1']:.4f}")
+                    if vm["loss"] < best_val_loss:
+                        best_val_loss, evals_since_best = vm["loss"], 0
                         save_best(global_step)
                     else:
                         evals_since_best += 1
@@ -353,10 +392,11 @@ def main():
 
                 test_every = tcfg.get("eval_test_every_steps", 0)
                 if test_every and test_loader is not None and global_step % test_every == 0:
-                    test_loss, test_acc = evaluate_sharded(model, test_loader, device, amp_dtype)
-                    log({"test/loss": test_loss, "test/acc": test_acc}, global_step)
+                    tm = evaluate_sharded(model, test_loader, device, amp_dtype, num_classes)
+                    log({f"test/{k}": v for k, v in tm.items()}, global_step)
                     if main_proc:
-                        print(f"\n[test ] step {global_step}: test_loss={test_loss:.4f} test_acc={test_acc:.4f}")
+                        print(f"\n[test ] step {global_step}: test_loss={tm['loss']:.4f} test_acc={tm['acc']:.4f} "
+                              f"test_f1={tm['f1']:.4f}")
 
                 if global_step % tcfg["save_every_steps"] == 0:
                     save_ckpt(global_step, epoch)
@@ -375,12 +415,12 @@ def main():
             break
 
         if len(val_loader.dataset) > 0:
-            val_loss, val_acc = evaluate_sharded(model, val_loader, device, amp_dtype)
-            log({"val/loss": val_loss, "val/acc": val_acc}, global_step)
+            vm = evaluate_sharded(model, val_loader, device, amp_dtype, num_classes)
+            log({f"val/{k}": v for k, v in vm.items()}, global_step)
             if main_proc:
-                print(f"[epoch {epoch}] val_loss={val_loss:.4f} val_acc={val_acc:.4f}")
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+                print(f"[epoch {epoch}] val_loss={vm['loss']:.4f} val_acc={vm['acc']:.4f} val_f1={vm['f1']:.4f}")
+            if vm["loss"] < best_val_loss:
+                best_val_loss = vm["loss"]
                 save_best(global_step)
         save_ckpt(global_step, epoch + 1)
 
@@ -391,11 +431,12 @@ def main():
         print("[test] loading best_model for final held-out evaluation...")
         test_model = build_model_fn(cfg).to(device)
         test_model.load_state_dict(torch.load(out_dir / "best_model.pt", map_location=device))
-        test_loss, test_acc = evaluate_sharded(test_model, test_loader, device, amp_dtype)
-        log({"test/loss": test_loss, "test/acc": test_acc}, global_step)
-        print(f"[test] loss={test_loss:.4f} acc={test_acc:.4f}")
+        tm = evaluate_sharded(test_model, test_loader, device, amp_dtype, num_classes)
+        log({f"test/{k}": v for k, v in tm.items()}, global_step)
+        log(sample_system_metrics(), global_step)
+        print(f"[test] loss={tm['loss']:.4f} acc={tm['acc']:.4f} f1={tm['f1']:.4f}")
         (out_dir / "test_results.json").write_text(
-            json.dumps({"test_loss": test_loss, "test_acc": test_acc, "step": global_step}, indent=2)
+            json.dumps({**{f"test_{k}": v for k, v in tm.items()}, "step": global_step}, indent=2)
         )
 
     if main_proc:

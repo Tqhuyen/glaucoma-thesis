@@ -43,6 +43,61 @@ def load_env_file() -> None:
             break
 
 
+def classification_metrics(preds, targets, num_classes: int = 2, eps: float = 1e-7) -> dict[str, float]:
+    """Accuracy + macro and positive-class precision/recall/F1 from label tensors.
+
+    `preds`/`targets` are integer tensors. Returns float dict with keys:
+      acc, precision, recall, f1          (macro over classes)
+      precision_pos, recall_pos, f1_pos   (class 1 = glaucoma positive)
+    """
+    preds = preds.reshape(-1)
+    targets = targets.reshape(-1)
+    cm = torch.zeros(num_classes, num_classes, dtype=torch.long, device=preds.device)
+    idx = targets * num_classes + preds
+    cm += torch.bincount(idx, minlength=num_classes * num_classes).reshape(num_classes, num_classes)
+
+    tp = cm.diag().float()
+    fp = cm.sum(0) - tp
+    fn = cm.sum(1) - tp
+    prec = tp / (tp + fp + eps)
+    rec = tp / (tp + fn + eps)
+    f1 = 2 * prec * rec / (prec + rec + eps)
+
+    total = cm.sum().item()
+    out = {
+        "acc": float(tp.sum().item() / total) if total else 0.0,
+        "precision": float(prec.mean()),
+        "recall": float(rec.mean()),
+        "f1": float(f1.mean()),
+    }
+    if num_classes > 1:
+        out["precision_pos"] = float(prec[1])
+        out["recall_pos"] = float(rec[1])
+        out["f1_pos"] = float(f1[1])
+    return out
+
+
+def sample_system_metrics() -> dict[str, float]:
+    """CPU / RAM / GPU / disk usage for TensorBoard+JSONL+wandb live tracking."""
+    m: dict[str, float] = {}
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        m["sys/cpu_percent"] = float(psutil.cpu_percent(interval=None))
+        m["sys/ram_used_gb"] = round(vm.used / 1e9, 2)
+        m["sys/ram_percent"] = float(vm.percent)
+        m["sys/disk_free_gb"] = round(psutil.disk_usage("/").free / 1e9, 2)
+    except Exception:
+        pass
+    if torch.cuda.is_available():
+        m["sys/gpu_util_percent"] = float(torch.cuda.utilization(0))
+        m["sys/gpu_mem_used_gb"] = round(torch.cuda.memory_allocated(0) / 1e9, 2)
+        total = torch.cuda.get_device_properties(0).total_memory / 1e9
+        m["sys/gpu_mem_total_gb"] = round(total, 2)
+        m["sys/gpu_mem_percent"] = round(m["sys/gpu_mem_used_gb"] / total * 100, 2)
+    return m
+
+
 def seed_worker(worker_id: int) -> None:
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)

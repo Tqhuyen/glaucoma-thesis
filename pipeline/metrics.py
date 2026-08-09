@@ -30,12 +30,20 @@ class MetricsLogger:
             try:
                 import wandb
                 self.wandb = wandb
+                # System metrics (GPU/CPU/RAM/disk) are tracked by wandb by default;
+                # only tune the sampling rate, never disable stats.
+                settings = None
+                try:
+                    settings = wandb.Settings(x_stats_sampling_interval=5)
+                except Exception:
+                    settings = None
                 wandb.init(
                     project=lcfg.get("wandb_project", "training"),
                     name=cfg["run_name"],
                     config=cfg,
                     resume="allow",
                     id=cfg["run_name"],
+                    settings=settings,
                 )
             except Exception as e:
                 print(f"[logging] wandb disabled ({e}). Run `wandb login` or set WANDB_API_KEY.")

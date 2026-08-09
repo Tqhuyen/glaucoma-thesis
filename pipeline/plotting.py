@@ -36,7 +36,7 @@ def load_metrics(out_dir: Path) -> dict:
 
 
 def render_curves(out_dir: Path, tag: str = "training_curves") -> Path | None:
-    """Plot train/val/test loss + accuracy from metrics.jsonl -> PNG.
+    """Plot train/val/test loss + accuracy + F1 from metrics.jsonl -> PNG.
 
     Returns the PNG path, or None if there is nothing to plot.
     """
@@ -45,21 +45,23 @@ def render_curves(out_dir: Path, tag: str = "training_curves") -> Path | None:
         return None
 
     steps = sorted(rows)
-    train_loss = [(s, rows[s]["train/loss"]) for s in steps if "train/loss" in rows[s]]
-    val_loss = [(s, rows[s]["val/loss"]) for s in steps if "val/loss" in rows[s]]
-    test_loss = [(s, rows[s]["test/loss"]) for s in steps if "test/loss" in rows[s]]
-    val_acc = [(s, rows[s]["val/acc"]) for s in steps if "val/acc" in rows[s]]
-    test_acc = [(s, rows[s]["test/acc"]) for s in steps if "test/acc" in rows[s]]
-    train_acc = [(s, rows[s]["train/acc"]) for s in steps if "train/acc" in rows[s]]
+
+    def series(key):
+        return [(s, rows[s][key]) for s in steps if key in rows[s]]
+
+    train_loss, val_loss, test_loss = series("train/loss"), series("val/loss"), series("test/loss")
+    val_acc, test_acc, train_acc = series("val/acc"), series("test/acc"), series("train/acc")
+    val_f1, test_f1, train_f1 = series("val/f1"), series("test/f1"), series("train/f1")
 
     if not (train_loss or val_loss or train_acc):
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(19, 5))
 
-    def plot_series(ax, series, label, color):
-        if series:
-            ax.plot([s for s, _ in series], [v for _, v in series], label=label, color=color, marker="o", ms=2.5, lw=1.2)
+    def plot_series(ax, series_data, label, color):
+        if series_data:
+            ax.plot([s for s, _ in series_data], [v for _, v in series_data],
+                    label=label, color=color, marker="o", ms=2.5, lw=1.2)
             ax.legend()
 
     plot_series(axes[0], train_loss, "train loss", "tab:blue")
@@ -78,6 +80,15 @@ def render_curves(out_dir: Path, tag: str = "training_curves") -> Path | None:
     axes[1].set_ylabel("accuracy")
     axes[1].set_ylim(0, 1.05)
     axes[1].grid(True, alpha=0.3)
+
+    plot_series(axes[2], train_f1, "train f1", "tab:blue")
+    plot_series(axes[2], val_f1, "val f1", "tab:orange")
+    plot_series(axes[2], test_f1, "test f1", "tab:green")
+    axes[2].set_title("F1 (higher is better)")
+    axes[2].set_xlabel("step")
+    axes[2].set_ylabel("f1")
+    axes[2].set_ylim(0, 1.05)
+    axes[2].grid(True, alpha=0.3)
 
     fig.suptitle(out_dir.name)
     fig.tight_layout()
