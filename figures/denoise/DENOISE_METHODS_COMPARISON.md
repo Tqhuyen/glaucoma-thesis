@@ -20,10 +20,17 @@ thang [0,255] của ảnh gốc để so sánh cùng thang đo.
 | 5 | **Wavelet (BayesShrink)** | Khử nhiễu miền wavelet | `db4`, soft, `BayesShrink`, `rescale_sigma=True` | Chang et al. 2000; `skimage.restoration.denoise_wavelet` |
 | 6 | **Non-Local Means (NLM)** | Phi cục bộ (khớp patch) | `h = 0.10`, `patch_size = 5`, `patch_distance = 3`, `fast_mode` | Buades et al. 2005; `skimage.restoration.denoise_nl_means` |
 | 7 | **BM3D** | Cộng tác khối (miền biến đổi 3D) | profile `np`, `sigma_psd ≈ 0.042` (ước lượng tự động) | Dabov et al. 2007; gói `bm3d` |
+| 8 | **DnCNN** (deep learning, GPU) | CNN học phần dư (residual learning) | gray **blind** (σ tự đo), 64 ch, ~20 lớp | Zhang et al. 2017; weights KAIR `dncnn_gray_blind.pth` |
+| 9 | **SwinIR** (deep learning, GPU) | Swin-Transformer khử nhiễu | gray denoising **σ=25**, SwinIR-M, `window=8` | Liang et al. 2021; `004_grayDN_DFWB_s128w8_SwinIR-M_noise25.pth` |
 
 Mọi phương pháp được áp dụng **2D trên từng B-scan** (slice theo trục 0), đúng quy
 trình notebook NLM trước đó. Với BM3D ước lượng `sigma_psd` bằng
 `skimage.restoration.estimate_sigma` (median trên 40 slice, thang [0,1]).
+
+**DnCNN & SwinIR** chạy qua PyTorch (`scripts/denoise_torch.py`): tự chọn GPU nếu có
+(`cuda`), fallback CPU; batch qua từng slice rồi ánh xạ về [0,255] giống các phương
+pháp CPU. Weights tải một lần về `%TEMP%/gf_denoise_weights` (DnCNN ~2.7 MB,
+SwinIR ~123 MB). Yêu cầu `pip install torch` (+ bản CUDA trên Colab).
 
 ---
 
@@ -142,6 +149,12 @@ python scripts/compare_denoise_methods.py --volume 2404 --workers 8
 # Chỉ vài phương pháp / volume khác
 python scripts/compare_denoise_methods.py --volume 2404 --methods nlm,tv
 python scripts/compare_denoise_methods.py --volume 3294 --methods bm3d
+
+# Thêm 2 phương pháp deep-learning dùng GPU (Colab: pip install torch bm3d scikit-image)
+# Chạy lại từng method để tải weights (~2.7 MB DnCNN + ~123 MB SwinIR) rồi so ảnh:
+python scripts/compare_denoise_methods.py --volume 2404 --methods dncnn
+python scripts/compare_denoise_methods.py --volume 2404 --methods swinir
+python scripts/compare_denoise_methods.py --volume 2404 --methods dncnn,swinir
 ```
 
 Tham số từng pp sửa trực tiếp trong dict `METHODS` đầu script; output luôn ghi vào

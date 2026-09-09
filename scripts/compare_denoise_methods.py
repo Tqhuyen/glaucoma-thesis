@@ -29,6 +29,16 @@ except Exception:
     _bm3d = None
     HAVE_BM3D = False
 
+try:
+    import denoise_torch
+
+    HAVE_TORCH = denoise_torch.available()
+except Exception:
+    denoise_torch = None
+    HAVE_TORCH = False
+
+TORCH_METHODS = {"dncnn", "swinir"}
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIG_DIR = os.path.join(ROOT, "figures", "denoise")
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "gf_vol_cache")
@@ -47,8 +57,10 @@ METHODS = {
     "wavelet": {"label": "Wavelet (BayesShrink)", "params": {"wavelet": "db4", "mode": "soft", "method": "BayesShrink"}},
     "nlm": {"label": "Non-Local Means", "params": {"h": 0.10, "patch_size": 5, "patch_distance": 3}},
     "bm3d": {"label": "BM3D", "params": {"sigma_psd": "auto"}},
+    "dncnn": {"label": "DnCNN (gray blind)", "params": {"device": "auto", "weights": "dncnn_gray_blind.pth"}},
+    "swinir": {"label": "SwinIR grayDN (noise=25)", "params": {"device": "auto", "weights": "004_grayDN_DFWB_s128w8_SwinIR-M_noise25.pth"}},
 }
-ORDER = ["gaussian", "median", "bilateral", "tv", "wavelet", "nlm", "bm3d"]
+ORDER = ["gaussian", "median", "bilateral", "tv", "wavelet", "nlm", "bm3d", "dncnn", "swinir"]
 
 
 def load_volume(stem):
@@ -174,6 +186,8 @@ def make_slice_fn(name, params):
                                            patch_distance=params["patch_distance"], fast_mode=True)
     if name == "bm3d":
         return lambda im: _bm3d.bm3d(im, sigma_psd=params["sigma_psd"])
+    if name in TORCH_METHODS:
+        raise RuntimeError(f"{name} is handled by denoise_volume (GPU path), not make_slice_fn")
     raise ValueError(name)
 
 
@@ -188,6 +202,10 @@ def denoise_volume(vol, name, workers=8, cache_path=None):
             return out, float(meta.get("time_s", 0.0))
     if name == "bm3d":
         METHODS[name]["params"]["sigma_psd"] = noise_sigma_estimate(vol, workers=workers)
+    if name in TORCH_METHODS:
+        if not HAVE_TORCH:
+            raise RuntimeError(f"{name} requires torch (Colab GPU: pip install torch)")
+        return denoise_torch.denoise_volume(name, vol, cache_path=cache_path)
     fn = make_slice_fn(name, METHODS[name]["params"])
     out = np.empty_like(vol)
 
@@ -240,6 +258,8 @@ def row_label(name):
         return f"NLM (h={p['h']}, patch={p['patch_size']}, d={p['patch_distance']})"
     if name == "bm3d":
         return f"BM3D (sigma_psd={p['sigma_psd']:.3f})" if isinstance(p["sigma_psd"], float) else "BM3D"
+    if name in ("dncnn", "swinir"):
+        return METHODS[name]["label"]
     return name
 
 
@@ -304,6 +324,10 @@ def main():
     if not HAVE_BM3D and "bm3d" in names:
         names.remove("bm3d")
         print("[warn] bm3d not importable -> dropped")
+    for m in list(names):
+        if m in TORCH_METHODS and not HAVE_TORCH:
+            names.remove(m)
+            print(f"[warn] {m} needs torch -> dropped")
 
     vol = load_volume(args.volume)
     dz = depth_axis(vol)
