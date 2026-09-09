@@ -57,6 +57,11 @@ _OPTIONAL_SCHEMA = [
     ("model.norm", (str,), lambda v: v in ("group", "batch")),
     ("model.residual", (bool,), None),
     ("data.normalize", (str,), lambda v: v in ("minmax", "robust", "none")),
+    ("data.model_input_shape", (int,), lambda v: v >= 32),
+    ("model.feature_size", (int,), lambda v: 12 <= v <= 192 and v % 12 == 0),
+    ("model.freeze_encoder", (bool,), None),
+    ("model.use_checkpoint", (bool,), None),
+    ("model.pretrained_ckpt", (str,), None),
     ("sanity.max_train_samples", (int,), lambda v: v >= 1),
     ("sanity.epochs", (int,), lambda v: v >= 1),
 ]

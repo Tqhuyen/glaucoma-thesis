@@ -1,0 +1,31 @@
+{
+  "volume": "2404",
+  "glaucoma": true,
+  "method": "NLM",
+  "nlm": {
+    "h": 0.1,
+    "patch_size": 5,
+    "patch_distance": 3
+  },
+  "resolution": 200,
+  "axes": {
+    "x": {
+      "slices": [
+        132,
+        148
+      ]
+    },
+    "y": {
+      "slices": [
+        22,
+        38
+      ]
+    },
+    "z": {
+      "slices": [
+        114,
+        130
+      ]
+    }
+  }
+}

@@ -93,19 +93,127 @@ class SimpleResidual3d(nn.Module):
         return self.act(x + self.norm(self.conv(x)))
 
 
+class SwinUNETRClassifier(nn.Module):
+    """SwinUNETR encoder turned into a classifier (decoder removed).
+
+    MONAI's SwinUNETR is a segmentation net; this wrapper keeps only the Swin
+    transformer encoder (``swinViT``), drops every decoder/encoder conv block,
+    and attaches a global pooling + MLP head. Input spatial dims must be
+    divisible by 32 (the ``patch_size ** 5`` constraint of SwinUNETR, e.g.
+    96/128).
+    """
+
+    def __init__(
+        self,
+        in_channels=1,
+        num_classes=2,
+        dropout=0.3,
+        feature_size=48,
+        use_checkpoint=False,
+        pretrained_ckpt="",
+        freeze_encoder=False,
+    ):
+        super().__init__()
+        from monai.networks.nets import SwinUNETR
+
+        self.backbone = SwinUNETR(
+            in_channels=in_channels,
+            out_channels=num_classes,
+            feature_size=feature_size,
+            use_checkpoint=use_checkpoint,
+        )
+        for name in (
+            "encoder1",
+            "encoder2",
+            "encoder3",
+            "encoder4",
+            "encoder10",
+            "decoder5",
+            "decoder4",
+            "decoder3",
+            "decoder2",
+            "decoder1",
+            "out",
+        ):
+            if hasattr(self.backbone, name):
+                delattr(self.backbone, name)
+
+        self.pool = nn.AdaptiveAvgPool3d(1)
+        feat = feature_size * 16
+        hidden_dim = max(64, feat // 4)
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(feat, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, num_classes),
+        )
+        if pretrained_ckpt:
+            self._load_pretrained(pretrained_ckpt)
+        if freeze_encoder:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+    def _load_pretrained(self, path):
+        """Load the official MONAI SwinUNETR SSL checkpoint (``model_swinvit.pt``).
+
+        Its keys live under ``module.<name>`` and cover only the Swin encoder;
+        they are matched onto ``backbone.swinViT.*``. Conv blocks and the head
+        stay randomly initialized.
+        """
+        ckpt = torch.load(path, map_location="cpu")
+        state = ckpt.get("state_dict", ckpt)
+        state = {(k[len("module.") :] if k.startswith("module.") else k): v for k, v in state.items()}
+        module = self.backbone.swinViT
+        current = module.state_dict()
+        matched = {k: v for k, v in state.items() if k in current and current[k].shape == v.shape}
+        if not matched:
+            raise ValueError(f"No Swin encoder weights in checkpoint matched: {path}")
+        result = module.load_state_dict(matched, strict=False)
+        print(
+            f"[swinunetr] loaded {len(matched)} tensors from {path}; "
+            f"missing={len(result.missing_keys)} unexpected={len(result.unexpected_keys)}"
+        )
+
+    def forward(self, x):
+        hidden = self.backbone.swinViT(x, self.backbone.normalize)
+        deep = self.pool(hidden[4])
+        logits = self.classifier(deep)
+        return {"logits": logits}
+
+
 def build_model(cfg):
     mcfg = cfg["model"]
-    return Simple3DCNN(
-        in_channels=mcfg.get("input_channels", 1),
-        num_classes=mcfg.get("num_classes", 2),
-        dropout=mcfg.get("dropout", 0.3),
-        hidden=tuple(mcfg.get("hidden", (16, 32, 64, 128))),
-        norm=mcfg.get("norm", "group"),
-        norm_groups=mcfg.get("norm_groups", 8),
-        pool_strides=tuple(mcfg.get("pool_strides", ((2, 2, 1), (2, 2, 1), (2, 2, 1)))),
-        pool_type=mcfg.get("pool_type", "max"),
-        residual=mcfg.get("residual", True),
-    )
+    architecture = mcfg.get("architecture", "simple3dcnn")
+    if architecture == "simple3dcnn":
+        return Simple3DCNN(
+            in_channels=mcfg.get("input_channels", 1),
+            num_classes=mcfg.get("num_classes", 2),
+            dropout=mcfg.get("dropout", 0.3),
+            hidden=tuple(mcfg.get("hidden", (16, 32, 64, 128))),
+            norm=mcfg.get("norm", "group"),
+            norm_groups=mcfg.get("norm_groups", 8),
+            pool_strides=tuple(mcfg.get("pool_strides", ((2, 2, 1), (2, 2, 1), (2, 2, 1)))),
+            pool_type=mcfg.get("pool_type", "max"),
+            residual=mcfg.get("residual", True),
+        )
+    if architecture == "swinunetr":
+        shape = cfg.get("data", {}).get("model_input_shape")
+        if shape is None or shape % 32 != 0:
+            raise ValueError(
+                "architecture 'swinunetr' requires data.model_input_shape divisible by 32 "
+                f"(e.g. 96 or 128); got {shape!r}"
+            )
+        return SwinUNETRClassifier(
+            in_channels=mcfg.get("input_channels", 1),
+            num_classes=mcfg.get("num_classes", 2),
+            dropout=mcfg.get("dropout", 0.3),
+            feature_size=mcfg.get("feature_size", 48),
+            use_checkpoint=mcfg.get("use_checkpoint", False),
+            pretrained_ckpt=mcfg.get("pretrained_ckpt", ""),
+            freeze_encoder=mcfg.get("freeze_encoder", False),
+        )
+    raise ValueError(f"Unknown glaucoma architecture: {architecture}")
 
 
 def probe_model_shapes():

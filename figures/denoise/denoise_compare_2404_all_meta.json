@@ -1,0 +1,175 @@
+{
+  "volume": "2404",
+  "glaucoma": true,
+  "resolution": 200,
+  "depth_axis": 1,
+  "metrics_regions": {
+    "rnfl_band": [
+      29,
+      57
+    ],
+    "background": [
+      5,
+      29
+    ],
+    "signal_threshold_p60_of_band": 84.0,
+    "crop_lateral_pad": 40
+  },
+  "planes": {
+    "x": {
+      "axis": 0,
+      "slices": [
+        132,
+        148
+      ]
+    },
+    "y": {
+      "axis": 1,
+      "slices": [
+        22,
+        38
+      ]
+    },
+    "z": {
+      "axis": 2,
+      "slices": [
+        114,
+        130
+      ]
+    }
+  },
+  "methods": {
+    "gaussian": {
+      "label": "Gaussian",
+      "params": {
+        "sigma": 1.5,
+        "sigma_psd": null
+      },
+      "time_s": 0.1
+    },
+    "median": {
+      "label": "Median",
+      "params": {
+        "footprint": 3,
+        "sigma_psd": null
+      },
+      "time_s": 0.21
+    },
+    "bilateral": {
+      "label": "Bilateral",
+      "params": {
+        "sigma_color": 0.1,
+        "sigma_spatial": 4.0,
+        "sigma_psd": null
+      },
+      "time_s": 34.33
+    },
+    "tv": {
+      "label": "Total Variation (Chambolle)",
+      "params": {
+        "weight": 0.1,
+        "sigma_psd": null
+      },
+      "time_s": 2.24
+    },
+    "wavelet": {
+      "label": "Wavelet (BayesShrink)",
+      "params": {
+        "wavelet": "db4",
+        "mode": "soft",
+        "method": "BayesShrink",
+        "sigma_psd": null
+      },
+      "time_s": 0.55
+    },
+    "nlm": {
+      "label": "Non-Local Means",
+      "params": {
+        "h": 0.1,
+        "patch_size": 5,
+        "patch_distance": 3,
+        "sigma_psd": null
+      },
+      "time_s": 0.99
+    },
+    "bm3d": {
+      "label": "BM3D",
+      "params": {
+        "sigma_psd": 0.0416
+      },
+      "time_s": 686.8
+    }
+  },
+  "metrics": {
+    "original": {
+      "snr": 5.5524194663127195,
+      "enl": 30.829361929888424,
+      "cnr": 3.1333636945518397,
+      "beta": 1.0,
+      "bg_noise_std": 30.50697551263016
+    },
+    "gaussian": {
+      "snr": 8.21691552162429,
+      "enl": 67.51770068951019,
+      "cnr": 3.834479801563132,
+      "beta": 0.3452881263455993,
+      "bg_noise_std": 25.91088547881908
+    },
+    "median": {
+      "snr": 6.849282004854597,
+      "enl": 46.91266398202501,
+      "cnr": 3.802812266364766,
+      "beta": 0.19748148211608837,
+      "bg_noise_std": 26.633602874575953
+    },
+    "bilateral": {
+      "snr": 7.074215708221184,
+      "enl": 50.04452788644334,
+      "cnr": 3.7338284546785103,
+      "beta": 0.7968882179906106,
+      "bg_noise_std": 26.56961998365967
+    },
+    "tv": {
+      "snr": 8.411357352444737,
+      "enl": 70.75093251052614,
+      "cnr": 4.048139375796419,
+      "beta": 0.4755619085686851,
+      "bg_noise_std": 25.743007132746737
+    },
+    "wavelet": {
+      "snr": 5.941361911348194,
+      "enl": 35.29978136161906,
+      "cnr": 3.3757774024409932,
+      "beta": 0.8824153033876265,
+      "bg_noise_std": 28.984608786858615
+    },
+    "nlm": {
+      "snr": 7.911437311226731,
+      "enl": 62.590840329470446,
+      "cnr": 4.130411239143727,
+      "beta": 0.2752395054783122,
+      "bg_noise_std": 25.21054453877037
+    },
+    "bm3d": {
+      "snr": 5.846264021162732,
+      "enl": 34.17880300514183,
+      "cnr": 3.519666061221298,
+      "beta": 0.8998618184361743,
+      "bg_noise_std": 28.168891951924227
+    }
+  },
+  "figures": {
+    "all": "denoise_compare_2404_all.png",
+    "per_method": [
+      "denoise_compare_2404_gaussian.png",
+      "denoise_compare_2404_median.png",
+      "denoise_compare_2404_bilateral.png",
+      "denoise_compare_2404_tv.png",
+      "denoise_compare_2404_wavelet.png",
+      "denoise_compare_2404_nlm.png",
+      "denoise_compare_2404_bm3d.png"
+    ],
+    "metrics_table": "denoise_metrics_2404.png",
+    "csv": "denoise_metrics_2404.csv"
+  }
+}

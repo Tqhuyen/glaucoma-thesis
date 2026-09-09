@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -14,7 +15,7 @@ def _robust_stats(volume):
 
 
 class GlaucomaNpyDataset(Dataset):
-    def __init__(self, data_dir, split, cache_in_ram=False, normalize="minmax"):
+    def __init__(self, data_dir, split, cache_in_ram=False, normalize="minmax", model_input_shape=None):
         self.labels = np.load(os.path.join(data_dir, f"{split}_labels.npy"))
         vp = os.path.join(data_dir, f"{split}_volumes.npy")
         if cache_in_ram:
@@ -22,6 +23,7 @@ class GlaucomaNpyDataset(Dataset):
         else:
             self.volumes = np.load(vp, mmap_mode="r")
         self.normalize = normalize
+        self.model_input_shape = model_input_shape
 
     def __len__(self):
         return len(self.labels)
@@ -32,8 +34,16 @@ class GlaucomaNpyDataset(Dataset):
             x, _, _ = _robust_stats(x)
         elif self.normalize != "none":
             x = x / 255.0
+        x = torch.from_numpy(np.ascontiguousarray(x))
+        if self.model_input_shape is not None:
+            x = F.interpolate(
+                x.view(1, 1, *x.shape),
+                size=(self.model_input_shape,) * 3,
+                mode="trilinear",
+                align_corners=False,
+            ).view(self.model_input_shape, self.model_input_shape, self.model_input_shape)
         y = torch.tensor(int(self.labels[idx]), dtype=torch.long)
-        return torch.from_numpy(np.ascontiguousarray(x)), y
+        return x, y
 
 
 def build_dataloaders(cfg, smoke=False):
@@ -56,9 +66,16 @@ def build_dataloaders(cfg, smoke=False):
 
     cache = dcfg.get("cache_in_ram", False)
     normalize = dcfg.get("normalize", "minmax")
-    train_ds = GlaucomaNpyDataset(data_dir, "Training", cache_in_ram=cache, normalize=normalize)
-    val_ds = GlaucomaNpyDataset(data_dir, "Validation", cache_in_ram=cache, normalize=normalize)
-    test_ds = GlaucomaNpyDataset(data_dir, "Test", cache_in_ram=cache, normalize=normalize)
+    model_input_shape = dcfg.get("model_input_shape")
+    train_ds = GlaucomaNpyDataset(
+        data_dir, "Training", cache_in_ram=cache, normalize=normalize, model_input_shape=model_input_shape
+    )
+    val_ds = GlaucomaNpyDataset(
+        data_dir, "Validation", cache_in_ram=cache, normalize=normalize, model_input_shape=model_input_shape
+    )
+    test_ds = GlaucomaNpyDataset(
+        data_dir, "Test", cache_in_ram=cache, normalize=normalize, model_input_shape=model_input_shape
+    )
 
     if smoke:
         limit = cfg["smoke"]["max_train_samples"]

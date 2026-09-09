@@ -1,0 +1,26 @@
+{
+  "2404": {
+    "glaucoma": true,
+    "depth_axis": 1,
+    "slab": [
+      25,
+      58
+    ]
+  },
+  "3294": {
+    "glaucoma": true,
+    "depth_axis": 1,
+    "slab": [
+      36,
+      69
+    ]
+  },
+  "2615": {
+    "glaucoma": false,
+    "depth_axis": 1,
+    "slab": [
+      47,
+      80
+    ]
+  }
+}
