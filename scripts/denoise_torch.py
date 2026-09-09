@@ -167,6 +167,23 @@ def _build(name, device):
     raise ValueError(name)
 
 
+_MODEL_CACHE = {}
+
+
+def get_model(name, device="auto"):
+    if not TORCH_OK:
+        raise RuntimeError("torch not importable")
+    if device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    key = (name, str(device))
+    model = _MODEL_CACHE.get(key)
+    if model is None:
+        print(f"[torch denoiser] building {name} on {device} ...", flush=True)
+        model = _build(name, device)
+        _MODEL_CACHE[key] = model
+    return model
+
+
 def _denoise_volume(model, device, name, vol):
     n = vol.shape[0]
     h, w = vol.shape[1:]
@@ -209,8 +226,7 @@ def denoise_volume(name, vol, device="auto", cache_path=None):
         raise RuntimeError("torch not importable")
     if device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[torch denoiser] building {name} on {device} ...", flush=True)
-    model = _build(name, device)
+    model = get_model(name, device)
     t0 = time.time()
     out = _denoise_volume(model, device, name, vol)
     dt = time.time() - t0
