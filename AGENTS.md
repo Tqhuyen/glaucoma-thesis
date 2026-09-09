@@ -113,11 +113,15 @@ config.yaml → validate_config (fast fail) → build loaders → build model
     `pipeline/utils.py` — **always call `load_env_file()` before `wandb.init()`**.
   - `.env` is gitignored; never commit real keys.
 - **Drive sync (MANDATORY for EVERY artifact)** — every image/figure/model an agent
-  produces must also be saved to Google Drive under `logging.drive_sync_dir:
-  "/content/drive/MyDrive/..."`: training curves, metrics, checkpoints
-  (`pipeline/plotting.py` `sync_to_drive()`) **and** notebook/script outputs such as
-  `figures/**` (`denoise_compare_*.png`, `denoise_metrics_*.csv`, meta JSON), report
-  views, etc. "Saved locally or to git only" is NOT done — copy to Drive too.
+  produces must also be saved to Google Drive under the repo's Drive root
+  **`/content/drive/MyDrive/MasterBKDN/Thesis/`** (this is what every notebook uses —
+  see `SAVE_DIR`/`RESULTS_DRIVE`/`output_dir` in `notebooks/*.ipynb`), typically in a
+  per-experiment subfolder: training curves/metrics/checkpoints go under
+  `logging.drive_sync_dir` (e.g. `.../Thesis/sota_200`, `.../Thesis/multiview`,
+  `.../Thesis/denoise_sweep`), notebook/script figures go under
+  `.../Thesis/<experiment>_figures` mirroring `figures/**`
+  (`denoise_compare_*.png`, `denoise_metrics_*.csv`, meta JSON), report views, etc.
+  "Saved locally or to git only" is NOT done — copy to Drive too.
 
 ### W&B mandatory process (do this in EVERY experiment)
 1. **Set the key** — `.env` `WANDB_API_KEY=wandb_xxx` (repo root, gitignored) or
@@ -136,8 +140,11 @@ config.yaml → validate_config (fast fail) → build loaders → build model
 ### Notebook conventions
 - Notebooks are standalone Colab experiments (inline code, `!pip`/`!git` cells).
 - **Every figure/model a notebook produces must be saved to Drive**: mount Drive,
-  then copy `figures/**`, checkpoints, CSVs/meta to `DRIVE_SYNC_DIR` before
-  `run.finish()` (guard with env override so headless runs don't fail on mount).
+  then copy `figures/**`, checkpoints, CSVs/meta to
+  `DRIVE_SYNC_DIR = /content/drive/MyDrive/MasterBKDN/Thesis/<experiment>_figures`
+  before `run.finish()` (guard with env override so headless runs don't fail on
+  mount). Follow the exact paths used by existing notebooks (`sota_200`,
+  `multiview`, `denoise_sweep`, `3dino_ft`, ...).
 - **Variable shadowing trap**: define storage resolution (`STORE_RES=200`, raw)
   and model-input resolution (`MODEL_RES=112`) as **distinct names**. Do NOT
   reuse one `RESOLUTION` var for both — cell 6 must not overwrite cell 4's value
