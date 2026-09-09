@@ -168,4 +168,6 @@ models/glaucoma/data.py  GlaucomaNpyDataset (minmax/robust/none)
 configs/glaucoma.yaml    the ONLY glaucoma config (raw 200³)
 notebooks/3d_glaucoma_3dino_experiment.ipynb  3DINO-ViT transfer + wandb
 scripts/                 colab_setup, vast_setup, launch_ddp, slurm
+docs/                    thesis docs (index in docs/README.md): datasets,
+                         denoise comparison, multiview model, train platform
 ```

@@ -18,7 +18,7 @@
 
 Một khối OCT 200³ chứa quá nhiều thông tin dư thừa theo chiều sâu (depth). Nhóm A **nén** khối 3D thành một số **ảnh 2D kiểu "báo cáo"** bằng phép chiếu đơn giản (không cần học sâu), rồi cho 3 mạng 2D (mỗi mạng một view) **song song** với mạng 3D đọc thẳng khối gốc. Bốn luồng thông tin (1×3D + 3×2D) sau đó được **kết hợp (fusion)** để đưa ra quyết định glôcôm.
 
-![Sơ đồ tổng thể](figures/model_multiview_overview.png)
+![Sơ đồ tổng thể](../figures/model_multiview_overview.png)
 
 ## 2. Bước tiền xử lý — chiếu 2D (Group A)
 
@@ -36,7 +36,7 @@ Với mỗi volume `V` (200×200×200 uint8):
 
 Cả 3 đều là phép `mean`/`max` thuần NumPy — **không có tham số học** → chạy được ngay khi đọc dữ liệu.
 
-![Đầu vào 2D của các nhánh](figures/report_2d_branch_inputs.png)
+![Đầu vào 2D của các nhánh](../figures/report_2d_branch_inputs.png)
 
 ## 3. Các nhánh mã hoá (branch)
 
@@ -66,7 +66,7 @@ Mọi embedding được chiếu về **không gian chung 256 chiều**: `proj(e
 
 Cuối cùng **head**: `Linear → 2 logits` (no-glaucoma / glaucoma), mất mát **CrossEntropy**.
 
-![4 chế độ fusion](figures/model_fusion_variants.png)
+![4 chế độ fusion](../figures/model_fusion_variants.png)
 
 ## 5. Baselines để so sánh (ablation)
 
