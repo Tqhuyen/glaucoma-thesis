@@ -112,8 +112,10 @@ def train_proxy(vols, labels, val_vols, val_labels, bs, epochs, device, seed, lr
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     t0 = time.time()
+    hist = []
     for ep in range(epochs):
         model.train()
+        losses = []
         for x, y in tl:
             x, y = x.to(device), y.to(device)
             opt.zero_grad(set_to_none=True)
@@ -123,11 +125,18 @@ def train_proxy(vols, labels, val_vols, val_labels, bs, epochs, device, seed, lr
             scaler.step(opt)
             scaler.update()
             sched.step()
-        print(f"    epoch {ep+1}/{epochs} ({time.time()-t0:.0f}s)", flush=True)
+            losses.append(float(loss))
+        probs, ys, _ = predict(model, vl, device)
+        hm = rs.classification_metrics(probs, ys)
+        hm["loss"] = float(np.mean(losses))
+        hm["epoch"] = ep + 1
+        hist.append(hm)
+        print(f"    epoch {ep+1}/{epochs} ({time.time()-t0:.0f}s) auc={hm['auc_roc']:.4f} "
+              f"loss={hm['loss']:.4f}", flush=True)
     probs, ys, feats = predict(model, vl, device)
     met = rs.classification_metrics(probs, ys)
     met["train_min"] = round((time.time() - t0) / 60.0, 2)
-    return model, met, feats, ys
+    return model, met, feats, ys, hist
 
 
 def pca_np(X, k=16):
@@ -201,9 +210,9 @@ def main():
     models, metrics, feats = {}, {}, {}
     for s in args.sizes:
         print(f"[exp2] training {s}^3 ...", flush=True)
-        m, met, f, yv = train_proxy(data[s]["train_v"], data[s]["train_l"], data[s]["val_v"],
-                                    data[s]["val_l"], args.bs, args.epochs, device, args.seed,
-                                    width=args.width, n_train=args.train_n, n_val=args.val_n)
+        m, met, f, yv, _ = train_proxy(data[s]["train_v"], data[s]["train_l"], data[s]["val_v"],
+                                       data[s]["val_l"], args.bs, args.epochs, device, args.seed,
+                                       width=args.width, n_train=args.train_n, n_val=args.val_n)
         models[s], metrics[s], feats[s] = m, met, f
         print(f"[exp2] {s}^3 AUC={met['auc_roc']:.4f} AP={met['auc_pr']:.4f} F1={met['f1']:.4f} "
               f"bAcc={met['balanced_acc']:.4f} ECE={met['ece']:.4f} ({met['train_min']} min)", flush=True)
@@ -220,12 +229,12 @@ def main():
 
     if args.bs_large and 96 in data and 128 in data:
         print(f"[exp4] 128^3 bs={args.bs} vs 96^3 bs={args.bs_large} ...", flush=True)
-        _, m128s, _, _ = train_proxy(data[128]["train_v"], data[128]["train_l"], data[128]["val_v"],
-                                     data[128]["val_l"], args.bs, args.epochs, device, args.seed,
-                                     width=args.width, n_train=args.train_n, n_val=args.val_n)
-        _, m96l, _, _ = train_proxy(data[96]["train_v"], data[96]["train_l"], data[96]["val_v"],
-                                    data[96]["val_l"], args.bs_large, args.epochs, device, args.seed,
-                                    width=args.width, n_train=args.train_n, n_val=args.val_n)
+        _, m128s, _, _, _ = train_proxy(data[128]["train_v"], data[128]["train_l"], data[128]["val_v"],
+                                        data[128]["val_l"], args.bs, args.epochs, device, args.seed,
+                                        width=args.width, n_train=args.train_n, n_val=args.val_n)
+        _, m96l, _, _, _ = train_proxy(data[96]["train_v"], data[96]["train_l"], data[96]["val_v"],
+                                       data[96]["val_l"], args.bs_large, args.epochs, device, args.seed,
+                                       width=args.width, n_train=args.train_n, n_val=args.val_n)
         report["exp4"] = {"128_bs%d" % args.bs: m128s, "96_bs%d" % args.bs_large: m96l}
         print(f"[exp4] AUC 128 bs{args.bs}={m128s['auc_roc']:.4f} | 96 bs{args.bs_large}={m96l['auc_roc']:.4f}", flush=True)
 
