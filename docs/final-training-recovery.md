@@ -10,6 +10,8 @@ Các thay đổi trên máy local không tự cập nhật kernel Colab đang m�
 
 ## 2. Tiếp tục từ file trọng số vừa cứu
 
+Notebook hiện đã điền preset `raw_s42_recovered_20260910`: chỉ raw, seed 42, warm-start từ file cứu hộ, tối đa 10 epoch bổ sung, LR `5e-5`, batch 2, tích lũy 8, patience 5 và checkpoint mỗi 10 bước optimizer. Lựa chọn raw/42 dựa trên log local `raw_s42_validation_log.csv` có 22 epoch; bản thân file trọng số không xác nhận nguồn gốc hoặc epoch. Các cấu hình trong ví dụ dưới đây có thể dùng cho một nhóm mới khác; preset hiện hành đã được điền trực tiếp trong notebook.
+
 File đã cứu là state dictionary, không có optimizer, scheduler, epoch hoặc RNG. Vì vậy đây là **warm-start**, không phải resume chính xác lần train cũ. Bộ trọng số được giữ lại; trạng thái huấn luyện và W&B bắt đầu mới.
 
 Trong cell `Configuration`, sử dụng:
