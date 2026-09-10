@@ -17,3 +17,9 @@ venv/
 .venv/
 .env
 wandb/
+
+data/*
+!data/README.md
+
+opencode.json
+opencode.jsonc
