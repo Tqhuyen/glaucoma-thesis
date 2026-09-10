@@ -8,6 +8,7 @@
 | [`fusion-ablation-sweep.md`](fusion-ablation-sweep.md) | Ablation 6 phép fusion 2D–3D (Concat/Add/Attention/CrossGate/Mamba/FiLM) — cảnh báo collapse + bảng val/test cho báo cáo |
 | [`3d-backbone-sweep.md`](3d-backbone-sweep.md) | Sweep backbone 3D (17 run: ResNeXt3D/VNet/SegResNet/CNN/MONAI/MedicalNet/3DINO) — xếp hạng + cảnh báo collapse |
 | [`final-4branch-design.md`](final-4branch-design.md) | Thiết kế **mô hình 4 nhánh (1×3D + 3×2D)** tổng hợp từ 3 sweep + quy trình huấn luyện chống collapse |
+| [`view-redundancy-analysis.md`](view-redundancy-analysis.md) | Phân tích 3 view en-face có trùng lặp không → khuyến nghị số nhánh 2D (1/2/3) |
 | [`multiview-model.md`](multiview-model.md) | Kiến trúc mô hình đa luồng 2D-projection + 3D (Group A) |
 | [`train-platform-method.md`](train-platform-method.md) | So sánh nền tảng huấn luyện (local/Colab/vast.ai) & phương pháp tối ưu chi phí-thời gian |
 | [`swinunetr-encoder-notes.md`](swinunetr-encoder-notes.md) | Ghi chú encoder Swin-UNETR |
