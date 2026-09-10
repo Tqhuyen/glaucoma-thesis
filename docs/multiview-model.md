@@ -88,4 +88,41 @@ Nếu các view 2D (đặc biệt `slab_aip`/`slab_mip`) chứa tín hiệu bổ
 
 ---
 
+## 8. CrossGate fusion — chi tiết cài đặt (theo code)
+
+`FusionCrossGate` (trong `notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb`) dùng **3D token làm query**,
+**3 token 2D làm key/value** (cross-attention), rồi **cộng dư với cổng học được**:
+
+![CrossGate fusion](../figures/model_crossgate.png)
+
+Sơ đồ:
+
+```mermaid
+flowchart LR
+  V3[Raw 3D OCT 200^3] --> E3[Enc3D] --> P3["Proj: Linear+ReLU -> p3D in R^D"]
+  V2["3 en-face views (AIP/SlabAIP/SlabMIP)"] --> E2["Enc2D x3 (one per view)"] --> P2["Proj x3 -> p2D^1..3 in R^D"]
+  P3 --> Q["q = p3D (1 token)"]
+  P2 --> KV["K = V = LayerNorm(p2D^1..3) (3 tokens)"]
+  Q --> MHA[Multi-Head Cross-Attention]
+  KV --> MHA
+  MHA --> O["o = sum_j w_j V_j in R^D"]
+  Q --> Z["z = p3D + sigmoid(alpha) * o"]
+  O --> Z
+  Z --> H["Head: Linear(D -> 2)"] --> S["softmax -> class"]
+```
+
+Công thức (đúng như code):
+
+- `q = p₃D` (shape `(B, 1, D)`); `K = V = LayerNorm(p₂D^{1..3})` (shape `(B, 3, D)`).
+- `w = softmax(q Kᵀ / √d)`; `o = Σⱼ wⱼ Vⱼ`.
+- `z = p₃D + σ(α) · o`, với `α` là **scalar học được** (khởi tạo `0.5` → `σ(α) ≈ 0.622`).
+- `logits = Linear(D → 2)(z)`; mất mát `CrossEntropyLoss`.
+
+Khác biệt với `attn` (self-attention trên cả 4 token): **CrossGate chỉ để nhánh 3D "hỏi" nhánh 2D** và giữ
+nhánh 3D làm đường chính qua residual — nhánh 2D chỉ **điều chỉnh** (qua cổng) chứ không thay thế.
+
+*Vẽ lại:* `python scripts/render_crossgate_diagram.py` → `figures/model_crossgate.png`.
+
+---
+
 *Tài liệu được sinh từ mô tả kiến trúc trong `notebooks/3d_glaucoma_multiview_2d3d.ipynb`; hình vẽ tái lập bằng `scripts/render_multiview_model_diagram.py` và `scripts/render_report_views.py`.*
