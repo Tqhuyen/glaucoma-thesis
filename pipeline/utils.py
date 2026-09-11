@@ -181,7 +181,7 @@ def optimal_num_workers(cfg_value) -> int:
 
 def setup_hf_env(hf_cfg: dict) -> str | None:
     if hf_cfg.get("fast_transfer", True):
-        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+        os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")

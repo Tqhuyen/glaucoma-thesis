@@ -24,7 +24,7 @@ def main():
     num_proc = optimal_num_proc(cfg["data"].get("num_proc", "auto"))
 
     t0 = time.time()
-    print(f"[download] {cfg['data']['dataset']} with num_proc={num_proc}, hf_transfer=on")
+    print(f"[download] {cfg['data']['dataset']} with num_proc={num_proc}, xet_high_performance=on")
     ds = load_dataset(cfg["data"]["dataset"], token=token, num_proc=num_proc)
     print(f"[download] done in {time.time() - t0:.1f}s")
     for split, d in ds.items():

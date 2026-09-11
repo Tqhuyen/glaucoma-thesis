@@ -94,7 +94,7 @@ harvardairobotics/Harvard-GF (HF, per-scan .npz 'oct_bscans' 200³ uint8)
 - Always download from HF **with credentials** (`HF_TOKEN` from `.env`/Colab Secret,
   passed as `token=`), and only the splits/patterns actually used
   (`allow_patterns` / per-file `hf_hub_download`) — never the whole repo; prefer
-  `hf_transfer` for max speed.
+  `HF_XET_HIGH_PERFORMANCE=1` for max speed (the old `HF_HUB_ENABLE_HF_TRANSFER` is deprecated).
 - Cache/reuse processed data (views, denoise, heavy augmentation); per case decide
   whether it is worth uploading to a **versioned HF dataset repo** (method + params
   + implementation hash) so later runs skip recompute — ask before uploading.

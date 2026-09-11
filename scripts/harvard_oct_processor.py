@@ -42,7 +42,7 @@ STAGING.mkdir(parents=True, exist_ok=True)
 
 random.seed(42)
 np.random.seed(42)
-os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
 print(f"HF: {HF_USER}  |  Output: {OUTPUT_REPO}  |  Disk free: {shutil.disk_usage(STAGING).free/1e9:.1f} GB", flush=True)
 

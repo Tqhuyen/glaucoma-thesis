@@ -31,7 +31,7 @@ def main():
     token = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
     if not token:
         raise RuntimeError("HF_TOKEN is not set; authenticated upload is required")
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
     from huggingface_hub import HfApi
 
     api = HfApi(token=token)

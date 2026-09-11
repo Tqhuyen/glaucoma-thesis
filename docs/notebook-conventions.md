@@ -105,7 +105,8 @@ WARM_START_WEIGHTS = ...
 - **Resolution linh hoạt theo config**: storage ở `STORE_RES` có thể là 200, 128, 96, … tùy bài toán; model input
   (`RES3D`/`RES2D`) khai báo riêng và resize on-the-fly. Không hardcode 200; kiểm tra shape theo `STORE_RES`.
 - **Luôn tải HF bằng authenticated credentials**: `HF_TOKEN` từ `.env`/Colab Secret, truyền `token=` vào
-  `snapshot_download`/`hf_hub_download`; bật `hf_transfer` nếu có để đạt tốc độ tối đa. Real run thiếu token → fail sớm.
+  `snapshot_download`/`hf_hub_download`; bật `HF_XET_HIGH_PERFORMANCE=1` để đạt tốc độ tối đa (biến cũ
+  `HF_HUB_ENABLE_HF_TRANSFER` đã bị deprecated). Real run thiếu token → fail sớm.
 - **Chỉ tải phần dùng đến**: dùng `allow_patterns` (hoặc tải từng file) cho đúng split/loại file cần; không
   `snapshot_download` cả repo.
 - **Tái sử dụng & cache**: build storage idempotent (reuse qua nhiều notebook/run), ghi `manifest.json`; cache view
@@ -227,7 +228,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Storage resolution do config quyết định (`STORE_RES`: 200/128/96/…), không hardcode; model input khai báo riêng
   và resize on-the-fly (cast float trước `F.interpolate`).
 - **Luôn tải HF có xác thực** (`HF_TOKEN` + `token=`); chỉ tải split/pattern thực sự dùng (`allow_patterns`),
-  không tải cả repo; ưu tiên `hf_transfer` để tăng tốc.
+  không tải cả repo; ưu tiên `HF_XET_HIGH_PERFORMANCE=1` để tăng tốc.
 - Cache/tái sử dụng dữ liệu đã xử lý; quyết định có nên upload lên HF (versioned, kèm identity) khi xử lý đắt và
   sẽ dùng lại; chỉ upload khi được yêu cầu/đồng ý.
 - `data/` bị gitignore — không commit/push dữ liệu vào git.
@@ -277,7 +278,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
   chỉ chuyển tensor sang CPU khi thật cần (metrics/log/artifact).
 - **Data pipeline**: loader lazy + cache theo key; không đọc modality không dùng; CUDA dùng `pin_memory=True` +
   `.to(device, non_blocking=True)`; Windows `num_workers=0`; cache view/denoise/augmentation thay vì tính lại.
-- **Tải dữ liệu**: `allow_patterns` chỉ tải phần dùng; token + `hf_transfer` để tối đa băng thông.
+- **Tải dữ liệu**: `allow_patterns` chỉ tải phần dùng; token + `HF_XET_HIGH_PERFORMANCE=1` để tối đa băng thông.
 - **AMP/TF32**: bf16 nếu có, ngược lại fp16 + GradScaler; trên CUDA bật `cudnn.benchmark=True` và TF32 cho
   matmul/conv khi phần cứng hỗ trợ; `torch.compile` chỉ dùng sau khi kiến trúc đã ổn định.
 - **Batch theo VRAM**: thay vì đoán, **chọn batch size theo cấu hình train + dữ liệu hiện tại** bằng
