@@ -24,6 +24,7 @@ Thứ tự dưới đây lấy từ sweep notebook; notebook train đơn lẻ c�
 | 9 | Probe + train loop | `probe()` kiểm tra 1 forward/backward, params, VRAM; `train_one()` resume-safe, lưu JSON per-run | Cell 24–27 |
 | 10 | Sweep driver (nếu sweep) | Tier/spec, mỗi run xong ghi `results.json` (local + Drive) ngay, figure per-run xuất ngay | Cell 28–31 |
 | 11 | X-AI (nếu có) | Grad-CAM 3D/2D, occlusion, integrated gradients, branch importance, LIME; lưu PNG + markdown | Cell 32–38 |
+| 11b | Phân tích tùy chọn (nếu có) | Info-theory/embedding analysis chạy **trong cùng notebook** qua cờ `RUN_INFO`; logic ở `scripts/information_theory.py` | `3d_glaucoma_train_3branch_crossgate.ipynb` |
 | 12 | Chạy + reporting | Chạy sweep/train, render bảng CSV/PNG, markdown report, **Drive sync + `run.finish()`** | Cell 39–49 |
 | 13 | Notes/limitations (markdown) | Cảnh báo single-seed, metric thiếu ghi `—`, confound, cách resume | Cell 50 |
 
@@ -106,6 +107,15 @@ Trên best model + mẫu test cân bằng lớp:
 Lưu local + Drive: PNG, `XAI_REPORT.md`, `fusion_xai.pt` (weights/gate/branch_drop/attention), sync **ngay khi sinh ra**.
 W&B: ảnh `wandb.Image`, bảng **`xai/fusion_table`** (`branch`, `crossgate_attention`, `drop_probability`) và summary
 `xai/gate`, `xai/drop_*`, `xai/attention_*` để so sánh X-AI giữa các model.
+
+### 2.11b Phân tích tùy chọn (information theory / embedding)
+- Cùng notebook với train, gate bằng cờ config (`RUN_INFO=True/False`); **không** tạo notebook fork chỉ để thêm phân tích.
+- `evaluate()` chỉ capture embedding mỗi epoch khi cờ bật; khi tắt thì dùng predict thường (không thêm chi phí).
+- Đầu ra: linear probe (logistic + MLP), MINE (DV)/NWJ, MIC, surrogate data testing (permutation + p-value),
+  joint/conditional MI giữa các nhánh, information plane I(X;Z)–I(Z;Y).
+- Lưu `info_theory.json`/`info_theory.pt` + figure; log bảng/giá trị lên W&B (`probes/*`, `mi/*`, `surrogate/*`);
+  artifact sync Drive ngay khi sinh ra.
+- Giới hạn subset/steps/PCA-dim để không làm chậm run; cell này cũng chịu trách nhiệm `run.finish()` khi cờ bật.
 
 ### 2.12 Reporting
 Learning curves, ROC, PR, calibration, confusion; `metrics.json` + CSV + bảng split; log W&B; sync Drive;
@@ -192,6 +202,12 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
   forward lại; log bảng/giá trị thay vì lưu tensor lớn.
 - **Không tính lại cái đã có**: tái sử dụng cache (local/Drive) và cân nhắc upload HF cho preprocessing đắt.
 
+### 3.11 Một notebook chuẩn cho mỗi kiến trúc
+- Mỗi kiến trúc/preset chỉ có **một notebook train chuẩn**; các giai đoạn tùy chọn (X-AI, information theory,
+  phân tích embedding) là **cờ config** (`RUN_XAI`, `RUN_INFO`) trong cùng notebook — không nhân bản/fork notebook.
+- Giữ đúng thứ tự cell mục 1; logic tái sử dụng nằm ở `scripts/*.py`, notebook chỉ cấu hình và gọi.
+- Notebook mới phải pass `*_SMOKE=1` (CPU, synthetic) và checklist mục 4 trước khi giao.
+
 ## 4. Checklist trước khi giao notebook
 
 - [ ] Đúng thứ tự cell mục 1; config một nguồn duy nhất, có env override.
@@ -200,6 +216,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - [ ] **Train log đủ bộ metric mỗi optimizer step; val + test log đủ bộ metric mỗi epoch.**
 - [ ] **Chốt cuối có calibrated `train`/`val`/`test` + bootstrap CI và bảng `report/split_table` trên W&B.**
 - [ ] **Sau train chạy X-AI trên best model, log `xai/fusion_table` + giá trị `xai/*` lên W&B (hoặc ghi rõ ngoại lệ).**
+- [ ] **Optional stages (X-AI/info-theory) là cờ trong cùng notebook, không tách/fork notebook; logic ở `scripts/`.**
 - [ ] Mọi artifact (figure/model/CSV/report/X-AI) sync Drive ngay khi sinh ra.
 - [ ] HF download có `HF_TOKEN` + `allow_patterns` chỉ tải phần dùng; real run thiếu token fail sớm.
 - [ ] `STORE_RES` lấy từ config (200/128/96/…), không hardcode; check shape theo `STORE_RES`; tách khỏi `RES3D`/`RES2D`.
@@ -217,9 +234,8 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 | Notebook | Dùng để tham khảo |
 |---|---|
 | [`3d_glaucoma_multiview_sota_sweep_xai.ipynb`](../notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb) | Cấu trúc sweep đầy đủ: registry backbone, fusion ablation, X-AI, resume-safe, reporting |
-| [`3d_glaucoma_train_3branch_crossgate.ipynb`](../notebooks/3d_glaucoma_train_3branch_crossgate.ipynb) | Train mô hình chính 3 nhánh (1×3D ResNeXt + 2×2D MaxViT + CrossGate): 3D chạy **96³** resize on-the-fly, **view 2D chiếu từ raw 200³**; full metrics 3 tập, X-AI + bảng W&B, resume, smoke |
-| [`3d_glaucoma_final_2x2d_3d_crossgate.ipynb`](../notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb) | Train 1 model với recovery contract (`last.pt`/`best.pt`/emergency weights), warm-start, calibrated report |
-| [`3d_glaucoma_crossgate_resnext96_infotheory.ipynb`](../notebooks/3d_glaucoma_crossgate_resnext96_infotheory.ipynb) | Biến thể resolution + phân tích lý thuyết thông tin (probe/MINE/surrogate/IB) |
+| [`3d_glaucoma_train_3branch_crossgate.ipynb`](../notebooks/3d_glaucoma_train_3branch_crossgate.ipynb) | Notebook train chuẩn 3 nhánh (1×3D ResNeXt + 2×2D MaxViT + CrossGate): 3D chạy **96³** resize on-the-fly, **view 2D chiếu từ raw 200³**; full metrics 3 tập, X-AI, info-theory tùy chọn (`RUN_INFO`), resume, smoke |
+| [`3d_glaucoma_final_2x2d_3d_crossgate.ipynb`](../notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb) | Notebook train chuẩn cho tập **Bilateral 200³** (denoise cache + recovery contract): full metrics 3 tập, X-AI + bảng W&B, warm-start tùy chọn, smoke |
 | [`3d_glaucoma_resolution_96_128_200.ipynb`](../notebooks/3d_glaucoma_resolution_96_128_200.ipynb) | So sánh resolution trên cùng backbone |
 | [`3d_glaucoma_denoise_gpu_compare.ipynb`](../notebooks/3d_glaucoma_denoise_gpu_compare.ipynb) | So sánh phương pháp khử nhiễu + metric ảnh |
 

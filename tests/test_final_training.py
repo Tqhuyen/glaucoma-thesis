@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import signal
 from pathlib import Path
 
@@ -346,20 +347,24 @@ def test_partial_denoise_and_per_source_views(tmp_path, channel):
     torch.testing.assert_close(ds[0][0], ds[0][0], rtol=0, atol=0)
 
 
-def test_notebook_bilateral_finetune_preset():
+def test_notebook_bilateral_200_preset():
     notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
     cells = json.loads(notebook.read_text(encoding="utf-8"))["cells"]
     source = next("".join(c["source"]) for c in cells if "RUN_GROUP = " in "".join(c["source"]))
-    namespace = {"SMOKE": False}
+    namespace = {"SMOKE": False, "os": os}
     exec(source.split("SMOKE_ROOT =")[0], namespace)
     assert namespace["DATASETS"] == ["bilateral"]
-    assert namespace["RUN_TARGET"] == namespace["WARM_START_TARGET"] == "bilateral_s42"
-    assert namespace["EPOCHS"] == 5
-    assert namespace["PATIENCE"] >= namespace["EPOCHS"]
+    assert namespace["RUN_TARGET"] == "bilateral_s42"
+    assert namespace["STORE_RES"] == namespace["RES3D"] == 200
+    assert namespace["RES2D"] == 224
     assert namespace["BUILD_DENOISED"]
-    assert namespace["WARM_START_WEIGHTS"].endswith("raw_s42_recovered_20260910/raw_s42/best_weights.pt")
+    assert namespace["DENOISE_METHOD"] == "bilateral"
+    assert namespace["EPOCHS"] >= 5
+    assert namespace["PATIENCE"] >= 1
+    assert not namespace["WARM_START_WEIGHTS"]
+    assert not namespace["WARM_START_TARGET"]
     assert not namespace["RESUME"]
-    assert not namespace["RUN_XAI"]
+    assert namespace["RUN_XAI"]
 
 
 def test_notebook_smoke_offline_end_to_end(monkeypatch):
