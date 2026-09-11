@@ -24,3 +24,4 @@ data/*
 opencode.json
 opencode.jsonc
 figures/final_model/
+figures/denoise/cache/

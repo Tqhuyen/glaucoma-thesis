@@ -1,0 +1,191 @@
+{
+  "source_metadata": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\denoise_compare_2404_all_meta.json",
+  "source_metadata_sha256": "9a6d0a9b0c9653e2a4bbceb4870d1e169bf24d4f15f81c15fbc563db0ff96db0",
+  "inputs": [
+    {
+      "path": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2404.npy",
+      "sha256": "08adf96bad18e6b6335d90ae11f165d5a0437dd7511e0f7813948d4be15a7a75"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_gaussian.npy",
+      "sha256": "04c7f4d4c9382f7b4e0724bb88f0b44533f35f1511d910a1e7deda054d821136"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_median.npy",
+      "sha256": "04a99ee2a3dc30f139b28e8b1c0957d34bb249f1123082f4f553b0a574fb2593"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_bilateral.npy",
+      "sha256": "57412915ac816ff6e7b5a336d39bd130cd2e39175d06b0406c52248afa9ad175"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_tv.npy",
+      "sha256": "8e0a5505d62cfe9692adf7735156d54bf755263ef4dd1ee87ff4d4b64e1a8430"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_wavelet.npy",
+      "sha256": "20d54aef8be27515fd3baef1d99c4e70748ff9ff1a7cca1730ae81bd116ac219"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_nlm.npy",
+      "sha256": "51aab48dced13903d37143092c92e78cdfa41337847f6c09c99935d66fef850e"
+    },
+    {
+      "path": "C:\\Users\\huyen\\Downloads\\master_thesis\\glaucoma-thesis\\figures\\denoise\\cache\\2404_bm3d.npy",
+      "sha256": "7458094b4682b9bae518c4e86530d4b1b3d55144e9b4c7dfe75be0b51fd3f28b"
+    }
+  ],
+  "methods": [
+    "original",
+    "gaussian",
+    "median",
+    "bilateral",
+    "tv",
+    "wavelet",
+    "nlm",
+    "bm3d"
+  ],
+  "method_parameters_from_source": {
+    "gaussian": {
+      "label": "Gaussian",
+      "params": {
+        "sigma": 1.5,
+        "sigma_psd": null
+      },
+      "time_s": 0.1
+    },
+    "median": {
+      "label": "Median",
+      "params": {
+        "footprint": 3,
+        "sigma_psd": null
+      },
+      "time_s": 0.21
+    },
+    "bilateral": {
+      "label": "Bilateral",
+      "params": {
+        "sigma_color": 0.1,
+        "sigma_spatial": 4.0,
+        "sigma_psd": null
+      },
+      "time_s": 34.33
+    },
+    "tv": {
+      "label": "Total Variation (Chambolle)",
+      "params": {
+        "weight": 0.1,
+        "sigma_psd": null
+      },
+      "time_s": 2.24
+    },
+    "wavelet": {
+      "label": "Wavelet (BayesShrink)",
+      "params": {
+        "wavelet": "db4",
+        "mode": "soft",
+        "method": "BayesShrink",
+        "sigma_psd": null
+      },
+      "time_s": 0.55
+    },
+    "nlm": {
+      "label": "Non-Local Means",
+      "params": {
+        "h": 0.1,
+        "patch_size": 5,
+        "patch_distance": 3,
+        "sigma_psd": null
+      },
+      "time_s": 0.99
+    },
+    "bm3d": {
+      "label": "BM3D",
+      "params": {
+        "sigma_psd": 0.0416
+      },
+      "time_s": 686.8
+    }
+  },
+  "figure_inches": [
+    6.4,
+    9.4
+  ],
+  "dpi": 300,
+  "interpolation": "nearest",
+  "planes": [
+    {
+      "axis": "x",
+      "slice": 132,
+      "vmin": 4.0,
+      "vmax": 145.0,
+      "roi_xywh": [
+        60,
+        3,
+        80,
+        80
+      ]
+    },
+    {
+      "axis": "x",
+      "slice": 148,
+      "vmin": 4.0,
+      "vmax": 147.0,
+      "roi_xywh": [
+        60,
+        3,
+        80,
+        80
+      ]
+    },
+    {
+      "axis": "y",
+      "slice": 22,
+      "vmin": 8.0,
+      "vmax": 158.0,
+      "roi_xywh": [
+        60,
+        60,
+        80,
+        80
+      ]
+    },
+    {
+      "axis": "y",
+      "slice": 38,
+      "vmin": 12.0,
+      "vmax": 159.0,
+      "roi_xywh": [
+        60,
+        60,
+        80,
+        80
+      ]
+    },
+    {
+      "axis": "z",
+      "slice": 114,
+      "vmin": 4.0,
+      "vmax": 138.0,
+      "roi_xywh": [
+        60,
+        3,
+        80,
+        80
+      ]
+    },
+    {
+      "axis": "z",
+      "slice": 130,
+      "vmin": 3.0,
+      "vmax": 140.0,
+      "roi_xywh": [
+        60,
+        3,
+        80,
+        80
+      ]
+    }
+  ],
+  "notes": "Cached data only; no denoising or metric recomputation. ROI is a display crop, not a segmentation."
+}

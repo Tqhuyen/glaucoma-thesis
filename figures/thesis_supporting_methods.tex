@@ -1,0 +1,565 @@
+\chapter{Thiết lập bổ trợ và định nghĩa chỉ số}
+\label{app:supporting-methods}
+
+\section{Khảo sát các bộ dữ liệu và cơ sở lựa chọn}
+\label{sec:dataset-selection}
+Việc lựa chọn dữ liệu xuất phát từ mục tiêu phân loại glaucoma
+bằng khối ảnh OCT B-scan và các ảnh chiếu của chính khối
+ảnh đó. Các tiêu chí ưu tiên là: có chuỗi B-scan tổ chức thành khối
+3D; có nhãn phù hợp với bài toán phân loại; vùng quét phù hợp với
+phạm vi nghiên cứu; và có quy mô cùng phân hoạch cho phép huấn luyện,
+lựa chọn và đánh giá mô hình. Số ảnh có thể dùng để khử nhiễu không
+phải tiêu chí quyết định chọn bộ dữ liệu.
+
+\begingroup
+\setlength{\tabcolsep}{5pt}
+\begin{longtable}{@{}>{\RaggedRight\arraybackslash}p{2.2cm}>{\RaggedRight\arraybackslash}p{3.3cm}>{\RaggedRight\arraybackslash}p{2.9cm}>{\RaggedRight\arraybackslash}p{6.1cm}@{}}
+  \caption{Đối chiếu các bộ dữ liệu với bài toán phân loại từ khối B-scan và ảnh chiếu}
+  \label{tab:dataset-comparison}\\
+  \toprule
+  \textbf{Bộ dữ liệu} & \textbf{Dữ liệu OCT và vùng quét} &
+  \textbf{Quy mô công bố} & \textbf{Nhãn và mức phù hợp với luận văn}\\
+  \midrule
+  \endfirsthead
+  \multicolumn{4}{c}{\textit{Bảng~\thetable{} (tiếp theo)}}\\
+  \toprule
+  \textbf{Bộ dữ liệu} & \textbf{Dữ liệu OCT và vùng quét} &
+  \textbf{Quy mô công bố} & \textbf{Nhãn và mức phù hợp với luận văn}\\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot
+  Harvard-GF \cite{luo2024harvardgf,harvardgfRepo} &
+  Khối B-scan $200^3$; vùng đĩa thị &
+  3.300 khối ảnh từ 3.300 người &
+  Có nhãn âm tính/dương tính. Chọn làm nguồn chính cho nhánh 3D
+  và các ảnh chiếu 2D.\\
+  \midrule
+  GAMMA \cite{wu2022gamma} &
+  Khối OCT vùng hoàng điểm; 256 B-scan/khối; kèm ảnh đáy mắt &
+  300 cặp OCT--đáy mắt từ 276 người &
+  Có nhãn phân độ bệnh; thử thách chính gộp thành ba mức.
+  Là ứng viên khảo sát khả năng khái quát, nhưng khác vùng quét
+  và cần thống nhất nhãn trước khi đánh giá ngoài.\\
+  \midrule
+  OCTDL \cite{kulyabin2024octdl} &
+  B-scan 2D vùng hoàng điểm, không phát hành dưới dạng khối 3D &
+  2.064 ảnh từ 821 người &
+  Bảy nhóm bệnh/trạng thái võng mạc, không có lớp bệnh đích.
+  Không đáp ứng đồng thời đầu vào 3D và nhãn phân loại cần thiết.\\
+  \midrule
+  OCT2017 / Kermany \cite{kermany2018data} &
+  B-scan 2D; các ảnh được chia theo nhóm nhãn &
+  84.484 ảnh theo thống kê tác giả cung cấp\textsuperscript{*} &
+  Bốn nhóm CNV, DME, drusen và bình thường; không có lớp bệnh đích.
+  Số ảnh 2D lớn không thay thế số khối 3D có nhãn phù hợp.\\
+  \midrule
+  OCTID \cite{gholami2018octid} &
+  Ảnh OCT 2D từ quét raster võng mạc &
+  Hơn 500 ảnh &
+  Năm nhóm NO, MH, AMD, CSR và DR; không có lớp bệnh đích.
+  Không chọn làm dữ liệu huấn luyện chính.\\
+  \midrule
+  Duke / Srinivasan \cite{srinivasan2014data} &
+  Khối OCT vùng hoàng điểm &
+  45 người: 15 bình thường, 15 AMD, 15 DME &
+  Có dữ liệu 3D nhưng không có nhãn bệnh đích và quy mô nhỏ.
+  Không dùng để đánh giá trực tiếp bài toán phân loại của luận văn.\\
+  \midrule
+  Harvard-GDP \cite{harvardgdpRepo} &
+  Bản đồ RNFLT $225\times225$ và thị trường trong bản phát hành &
+  1.000 người &
+  Có nhãn bệnh và nhãn tiến triển cho một phần mẫu, nhưng không có
+  trường khối B-scan trong mô tả bản phát hành; không phù hợp với
+  nguồn đầu vào đã giới hạn của luận văn.\\
+\end{longtable}
+\endgroup
+\noindent\textit{Ghi chú:} Quy mô được ghi theo đơn vị của từng nguồn,
+không so sánh trực tiếp số ảnh 2D với số khối 3D hoặc số người.
+\textsuperscript{*}Số ảnh OCT2017 cần đối chiếu lại với danh sách tệp
+của phiên bản tải về; không mặc định mọi bản sao có cùng số ảnh.
+
+Từ đối chiếu trên, luận văn chọn Harvard-GF vì bộ dữ liệu cung cấp
+đồng thời khối B-scan 3D vùng đĩa thị và nhãn phân loại nhị phân.
+Nhờ đó, nhánh 3D và các nhánh ảnh chiếu có thể được xây dựng từ
+cùng một mẫu, tạo cơ sở so sánh mô hình đơn nhánh với mô hình hợp
+nhất mà không cần bổ sung loại dữ liệu lâm sàng khác. Quy mô 3.300
+mẫu và phân hoạch có sẵn thuận tiện cho thiết kế thực nghiệm,
+nhưng không bảo đảm một kiến trúc 3D cụ thể sẽ hội tụ hoặc khái quát tốt.
+
+Đối với GAMMA, khác biệt về vùng quét và cách định nghĩa nhãn là
+hạn chế chính khi áp dụng trực tiếp thiết kế hiện tại. Việc đánh
+giá ngoài trên bộ dữ liệu này đòi hỏi xác định trước
+ánh xạ nhãn, kiểm tra tính tương thích của phép chiếu và phân tích
+sự khác biệt phân phối \cite{wu2022gamma}. Các bộ OCT 2D có thể
+được xem xét cho nghiên cứu chuyển giao riêng, nhưng không nằm trong
+quy trình huấn luyện của luận văn. Khả năng hỗ trợ khử nhiễu không
+được dùng để thay thế yêu cầu về nhãn và cấu trúc dữ liệu phân loại.
+
+\section{Hệ thống chỉ số và quy ước đánh giá}
+\label{sec:evaluation-metrics}
+Các chỉ số được tổ chức theo đối tượng đo trong Bảng~\ref{tab:variables}.
+Val và Test lần lượt chỉ tập xác thực và tập kiểm tra, không phải tên chỉ số.
+Chẳng hạn, Val AUROC khác Val accuracy; riêng hai cột Val và Test của khảo
+sát nền ở Mục~\ref{sec:app-3d-baseline} được dùng với nghĩa độ chính xác.
+Các công thức dưới đây xác định cách diễn giải và quy trình báo cáo.
+Đối với số liệu đã có, những quy ước chưa được lưu trong nhật ký vẫn cần
+đối chiếu mã đánh giá; không mặc định mọi lần chạy đã dùng cùng cách tính.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Các nhóm chỉ số trong luận văn và phạm vi sử dụng}
+  \label{tab:variables}
+  \begin{tabular}{@{}>{\RaggedRight\arraybackslash}p{0.22\textwidth}>{\RaggedRight\arraybackslash}p{0.39\textwidth}>{\RaggedRight\arraybackslash}p{0.30\textwidth}@{}}
+    \toprule
+    Nhóm & Đại lượng & Phạm vi\\ \midrule
+    Nhãn phân loại & Accuracy, precision, recall, specificity, F1, balanced accuracy, MCC & Đánh giá tại ngưỡng cố định\\
+    Điểm số và xác suất & AUROC, PR-AUC, loss, ECE & Phân biệt và hiệu chỉnh xác suất\\
+    Quá trình học và tài nguyên & bestEp, best/final, mức giảm; tham số, VRAM, thời gian & Nhật ký huấn luyện\\
+    Chất lượng ảnh & SNR, ENL, CNR, $\beta$ & Khảo sát khử nhiễu bổ trợ\\
+    Độ tin cậy & Trung bình, độ lệch chuẩn, khoảng tin cậy & Chưa có thống kê nhiều seed; bootstrap dự đoán cố định nếu đủ dữ liệu\\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Đơn vị đánh giá và ma trận nhầm lẫn}
+Xét tập đánh giá gồm $n$ quan sát, với nhãn thật $y_i\in\{0,1\}$,
+trong đó 1 là lớp dương tính, và xác suất dự đoán $p_i=P_\theta(Y=1\mid X_i)$.
+Nhãn dự đoán là $\widehat y_i=\mathbf 1\{p_i\geq\tau\}$.
+Ngưỡng $\tau$ được xác định trên tập phát triển và giữ nguyên khi kiểm tra.
+Một quan sát ứng với một khối OCT theo phân hoạch đã công bố, không phải
+mỗi B-scan hoặc mỗi ảnh chiếu của cùng khối. Nếu giữ nhiều mắt hoặc lần
+chụp của một người, phân hoạch và ước lượng sai số phải xét phụ thuộc theo
+bệnh nhân. Các số đếm được cộng trên toàn tập trước khi tính chỉ số.
+
+\begin{equation}
+\begin{aligned}
+ TP&=\sum_{i=1}^{n}\mathbf 1\{y_i=1,\widehat y_i=1\},&
+ FN&=\sum_{i=1}^{n}\mathbf 1\{y_i=1,\widehat y_i=0\},\\
+ FP&=\sum_{i=1}^{n}\mathbf 1\{y_i=0,\widehat y_i=1\},&
+ TN&=\sum_{i=1}^{n}\mathbf 1\{y_i=0,\widehat y_i=0\}.
+\end{aligned}
+\label{eq:metric-confusion}
+\end{equation}
+TP và TN là số dự đoán đúng tương ứng ở lớp dương và âm; FN là số ca
+dương bị bỏ sót, còn FP là số ca âm bị báo dương. Tổng bốn số bằng $n$.
+Khi trình bày ma trận nhầm lẫn, hàng biểu thị nhãn thật, cột biểu thị nhãn
+dự đoán và thứ tự lớp là $(0,1)$, tức ma trận
+$\left(\begin{smallmatrix}TN&FP\\FN&TP\end{smallmatrix}\right)$.
+
+\subsection{Các chỉ số tính từ nhãn dự đoán}
+Các công thức nhị phân sau dùng lớp dương tính làm lớp quan tâm
+\cite{sklearnMetricsGuide}. Trong đó, recall cũng được gọi là sensitivity
+hoặc TPR, còn specificity tương ứng với TNR.
+\begingroup
+\setlength{\jot}{9pt}
+% Hai vế có hộp rộng 0 để dấu bằng nằm đúng giữa vùng văn bản.
+\newcommand{\CanGiuaDauBang}[2]{%
+  \makebox[0pt][r]{$\displaystyle #1$}
+  = \makebox[0pt][l]{$\displaystyle #2$}%
+}
+\begin{gather}
+  \CanGiuaDauBang{\mathrm{Accuracy}}{\frac{TP+TN}{n},}
+  \label{eq:metric-acc-precision}\\
+  \CanGiuaDauBang{\mathrm{Precision}}{\frac{TP}{TP+FP},}
+  \label{eq:metric-precision}\\
+  \CanGiuaDauBang{\mathrm{Recall}}{\frac{TP}{TP+FN},}
+  \label{eq:metric-recall-spec}\\
+  \CanGiuaDauBang{\mathrm{Specificity}}{\frac{TN}{TN+FP},}\\
+  \CanGiuaDauBang{\mathrm{FPR}}{\frac{FP}{FP+TN}=1-\mathrm{Specificity},}\\
+  \CanGiuaDauBang{\mathrm{Balanced\ accuracy}}{\frac{\mathrm{TPR}+\mathrm{TNR}}{2},}
+  \label{eq:metric-balanced}\\
+  \CanGiuaDauBang{F1}{\frac{2TP}{2TP+FP+FN}.}
+  \label{eq:metric-f1}
+\end{gather}
+\endgroup
+Accuracy là tỷ lệ dự đoán đúng trên toàn tập. Precision là tỷ lệ dự đoán
+dương đúng trong tổng số dự đoán dương; recall là tỷ lệ ca dương thật được phát hiện.
+Specificity đo khả năng nhận đúng lớp âm, còn FPR đo tỷ lệ báo dương sai
+trong lớp âm. Balanced accuracy coi trọng hai lớp như nhau. F1 kết hợp
+precision và recall, nhưng không sử dụng TN. Các chỉ số nằm trong $[0,1]$
+khi mẫu số khác 0; giá trị lớn hơn được ưu tiên, ngoại trừ FPR.
+
+Hệ số tương quan Matthews sử dụng cả bốn số đếm \cite{sklearnMCC}:
+\begin{equation}
+ \mathrm{MCC}=\frac{TP\,TN-FP\,FN}
+ {\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}}.
+ \label{eq:metric-mcc}
+\end{equation}
+MCC nằm trong $[-1,1]$: 1 ứng với dự đoán hoàn toàn đúng, $-1$ ứng với
+đảo ngược hoàn toàn và 0 biểu thị không có tương quan tuyến tính giữa hai
+nhãn nhị phân khi công thức xác định. Với dự đoán một lớp, mẫu số có thể
+bằng 0; số 0 do thư viện trả về là quy ước xử lý, không phải phép chia hợp lệ.
+
+Việc diễn giải trường hợp mẫu số bằng 0 phụ thuộc quy ước của mã đánh
+giá. Các công thức trên không thay thế cho trung bình macro hoặc weighted
+nếu nhật ký dùng các chế độ đó. Trung bình F1 từng batch không tương đương F1
+toàn tập. Accuracy hoặc F1 cao riêng lẻ không loại trừ dự đoán một lớp;
+ví dụ cụ thể của các lần chạy hợp nhất đặc trưng được phân tích tại
+Phương trình~\eqref{eq:fusion-one-class}.
+
+\subsection{Diện tích dưới đường cong ROC và precision--recall}
+AUROC sử dụng điểm số chưa áp ngưỡng, không dùng nhãn đã làm tròn
+\cite{sklearnROC}. Đường ROC biểu diễn TPR theo FPR khi thay đổi ngưỡng.
+Với $n_+$ mẫu dương và $n_-$ mẫu âm, cách tính thực nghiệm tương đương là
+\begin{equation}
+ \widehat{\mathrm{AUROC}}=\frac{1}{n_+n_-}
+ \sum_{i:y_i=1}\sum_{j:y_j=0}
+ \left[\mathbf 1\{p_i>p_j\}+\frac12\mathbf 1\{p_i=p_j\}\right].
+ \label{eq:metric-auroc}
+\end{equation}
+Chỉ số phản ánh khả năng xếp điểm mẫu dương cao hơn mẫu âm, với trọng số một nửa khi hòa điểm.
+AUROC bằng 1 là phân biệt hoàn hảo; điểm số hằng cho AUROC bằng 0,5 nếu
+cả hai lớp đều có mặt. Giá trị lớn hơn được ưu tiên, nhưng AUROC trên 0,5
+trong một lần chạy chưa xác lập ý nghĩa thống kê hoặc độ tin cậy xác suất.
+
+Đường precision--recall biểu diễn precision theo recall. Với các điểm
+$(R_k,P_k)$ được sắp theo recall tăng dần, hai cách tổng hợp cần phân biệt là
+\begin{align}
+ \mathrm{PR\!\text{-}\!AUC}_{\mathrm{trap}}
+   &=\sum_{k=1}^{K}(R_k-R_{k-1})\frac{P_k+P_{k-1}}{2},\\
+ \mathrm{AP}&=\sum_{k=1}^{K}(R_k-R_{k-1})P_k.
+ \label{eq:metric-pr-ap}
+\end{align}
+AP là average precision, gán trọng số theo phần recall tăng thêm và không
+nội suy tuyến tính như quy tắc hình thang \cite{sklearnAP}.
+Cả hai đều ưu tiên giá trị lớn hơn nhưng có thể cho kết quả khác nhau.
+Cách dựng điểm đầu/cuối và xử lý điểm số hòa là thông tin cần thiết để tái lập.
+Luận văn giữ tên PR-AUC của nhật ký
+cho đến khi xác nhận hàm tính, thay vì diễn giải các giá trị đó là AP.
+Tỷ lệ lớp dương $\widehat\pi=n_+/n$ cần được báo cáo kèm theo để diễn giải
+precision và so sánh các tập có phân bố nhãn khác nhau.
+
+Độ nhạy tại mức đặc hiệu mục tiêu $s_0$ được đánh giá bằng cách chọn
+$\tau^*$ trên tập xác thực theo quy tắc định trước, chẳng hạn
+\begin{equation}
+ \tau^*\in\underset{\tau:\,\mathrm{Specificity}_{\mathrm{val}}(\tau)\geq s_0}
+ {\operatorname{argmax}}\ \mathrm{Recall}_{\mathrm{val}}(\tau).
+ \label{eq:metric-target-specificity}
+\end{equation}
+Sau khi xử lý hòa điểm theo quy tắc định trước, giữ nguyên $\tau^*$ để tính
+recall và specificity trên tập kiểm tra. Độ đặc hiệu thực tế trên tập kiểm tra không mặc nhiên
+bằng hoặc vượt $s_0$; cả hai kết quả phải được báo cáo. Chỉ số này còn
+thuộc kế hoạch đánh giá, chưa có giá trị trong các bảng hiện tại.
+
+\subsection{Hàm mất mát và chất lượng xác suất dự đoán}
+Với xác suất lớp dương và không dùng trọng số, cross-entropy nhị phân
+(BCE), cũng gọi là log-loss, được tính bằng \cite{sklearnLogLoss}
+\begin{equation}
+ L_{\mathrm{BCE}}=-\frac1n\sum_{i=1}^{n}
+ \left[y_i\ln \widetilde p_i+(1-y_i)\ln(1-\widetilde p_i)\right],
+ \quad \widetilde p_i=\min(1-\varepsilon,\max(\varepsilon,p_i)).
+ \label{eq:metric-bce}
+\end{equation}
+Ở đây $0<\varepsilon<1/2$ tránh logarithm của 0 và phải được ghi cùng
+kiểu dữ liệu số. Với hai logits $(a_{i0},a_{i1})$, xác suất tương ứng là
+$p_i=\exp(a_{i1})/[\exp(a_{i0})+\exp(a_{i1})]$; triển khai trên logits
+cần dạng ổn định số. Loss nhỏ hơn là tốt hơn; dự đoán sai nhưng gán xác
+suất rất cao bị phạt mạnh. Loss không đồng nhất với tỷ lệ phân loại sai.
+Các lần chạy có trọng số lớp, label smoothing hoặc cách lấy trung bình khác
+cần được xác định công thức thực dùng trước khi so sánh. Không mặc định cột loss
+đã lưu chính là BCE không trọng số. Logarithm tự nhiên cho đơn vị nat;
+đổi sang bit bằng $L_{\mathrm{bit}}=L_{\mathrm{BCE}}/\ln2$.
+
+Sai số hiệu chỉnh kỳ vọng (ECE) đo chênh lệch giữa mức tự tin và tỷ lệ
+đúng theo các khoảng xác suất \cite{guo2017calibration}. Với định nghĩa
+top-label, đặt $\widehat y_i^{\mathrm{top}}=\mathbf 1\{p_i\geq1/2\}$ và
+$c_i=\max(p_i,1-p_i)$. Chia $c_i$ thành $M$ khoảng, tập chỉ số trong
+khoảng thứ $m$ là $B_m$. Trên các khoảng không rỗng,
+\begin{align}
+ a_m&=\frac{1}{|B_m|}\sum_{i\in B_m}\mathbf 1\{y_i=\widehat y_i^{\mathrm{top}}\},&
+ c_m&=\frac{1}{|B_m|}\sum_{i\in B_m}c_i,\\
+ \mathrm{ECE}_{\mathrm{top}}&=\sum_{m:|B_m|>0}\frac{|B_m|}{n}|a_m-c_m|.
+ \label{eq:metric-ece}
+\end{align}
+ECE thuộc $[0,1]$, càng nhỏ càng tốt theo cách chia khoảng đã chọn.
+Một biến thể khác chia khoảng theo $p_i$ và thay $a_m,c_m$ bằng trung
+bình $y_i,p_i$ trong khoảng, nhằm đánh giá xác suất lớp dương. Hai định
+nghĩa không được dùng lẫn nhau. Việc diễn giải ECE đã ghi nhận đòi hỏi
+xác nhận biến thể, số khoảng, biên khoảng và cách chia đều độ rộng hay số mẫu.
+ECE thấp không bảo đảm phân biệt tốt; trị tuyệt đối cũng không cho biết
+riêng chiều quá tự tin hay thiếu tự tin.
+
+\subsection{Các mốc lựa chọn checkpoint}
+Gọi $m_e$ là chỉ số xác thực cần tối đa hóa tại epoch $e$, $E$ là epoch
+cuối được ghi. Khi quy định chọn epoch sớm nhất nếu hòa điểm,
+\begin{equation}
+ e^*=\min\operatorname*{argmax}_{1\leq e\leq E}m_e,\qquad
+ m_{\mathrm{best}}=m_{e^*},\quad m_{\mathrm{final}}=m_E,\quad
+ \Delta m=m_{\mathrm{best}}-m_{\mathrm{final}}.
+ \label{eq:metric-checkpoint}
+\end{equation}
+bestEp là $e^*$, không phải một chỉ số chất lượng cần tối đa hóa.
+Min loss là $\min_e L_e$ và có thể thuộc epoch khác $e^*$.
+Mức giảm $\Delta m$ chỉ mô tả chênh lệch hai mốc, không đo đầy đủ dao
+động đường học hoặc độ ổn định giữa các hạt giống ngẫu nhiên. Quy tắc hòa điểm trên là quy
+ước cho thiết kế đánh giá; các lần chạy trước vẫn cần đối chiếu mã checkpoint.
+Khảo sát nền dùng accuracy xác thực, bảng hợp nhất đặc trưng dùng AUROC xác thực
+tốt nhất, còn bảng 2D hiện ghi chỉ số xác thực ở epoch cuối.
+
+\subsection{Số tham số, bộ nhớ và thời gian tính toán}
+Với các tensor tham số phân biệt $\theta_j$ có kích thước $d_{j1},\ldots,d_{jq_j}$,
+số tham số tổng và số tham số được cập nhật là
+\begin{equation}
+ N_{\mathrm{param}}=\sum_j\prod_{k=1}^{q_j}d_{jk},\qquad
+ N_{\mathrm{train}}=\sum_{j:\,\theta_j\ \text{được tối ưu}}\prod_{k=1}^{q_j}d_{jk}.
+ \label{eq:metric-parameters}
+\end{equation}
+Tham số dùng chung chỉ đếm một lần; cột triệu tham số là
+$N_{\mathrm{param}}/10^6$. Ít tham số hơn biểu thị mô hình gọn hơn,
+không tự bảo đảm nhanh hơn hoặc chính xác hơn.
+
+Bộ nhớ cực đại trên khoảng đo $\mathcal T$ là
+$V_{\max}=\max_{t\in\mathcal T}V(t)$. Cần phân biệt bộ nhớ tensor đã
+cấp phát với bộ nhớ bộ cấp phát GPU giữ lại; phép đo cực đại phải đặt
+lại trước khoảng đo \cite{pytorchMemoryMetric}. Báo cáo rõ GB
+($10^9$ byte) hay GiB ($2^{30}$ byte), batch size, kích thước đầu vào,
+độ chính xác số và có bao gồm bước lan truyền ngược hay không.
+Các cột VRAM của khảo sát trước được giữ nguyên đơn vị do thiếu siêu dữ liệu để xác nhận phép chuyển đổi.
+
+Gọi $t_e$ là thời gian epoch thứ $e$ trong tập epoch được đo
+$\mathcal E$, $T_{\mathrm{infer}}$ là thời gian xử lý $n_{\mathrm{infer}}$ mẫu:
+\begin{equation}
+ \overline t_{\mathrm{ep}}=\frac{\sum_{e\in\mathcal E}t_e}{|\mathcal E|},\qquad
+ \ell=\frac{T_{\mathrm{infer}}}{n_{\mathrm{infer}}},\qquad
+ r=\frac{n_{\mathrm{infer}}}{T_{\mathrm{infer}}}.
+ \label{eq:metric-timing}
+\end{equation}
+Cột s/ep là giây mỗi epoch; $\ell$ là thời gian trung bình trên mẫu
+trong chế độ batch đã đo, còn $r$ là thông lượng (mẫu/giây).
+Thời gian toàn bộ lần chạy là $t_{\mathrm{end}}-t_{\mathrm{start}}$, chia 60 hoặc
+3600 để đổi giây sang phút hoặc giờ. Thời gian khử nhiễu giây/khối ảnh
+cũng phải ghi phạm vi I/O. Khi đo GPU cần đồng bộ trước và sau khoảng
+đo, quy định warm-up và cùng điều kiện phần cứng. Thời gian toàn bộ lần chạy
+khác thời gian suy luận; các lần chạy khác số epoch không tạo thành phép so sánh chi phí ngang bằng.
+
+\subsection{Độ biến thiên và khoảng tin cậy}
+Với $K\geq2$ lần chạy cùng cấu hình, kết quả $m_1,\ldots,m_K$ được tổng hợp bởi
+\begin{equation}
+ \overline m=\frac1K\sum_{k=1}^{K}m_k,\qquad
+ s_m=\sqrt{\frac{1}{K-1}\sum_{k=1}^{K}(m_k-\overline m)^2}.
+ \label{eq:metric-seed-statistics}
+\end{equation}
+$\overline m\pm s_m$ mô tả biến thiên giữa các hạt giống ngẫu nhiên, không phải khoảng tin cậy
+95\%. Sáu phương pháp khác nhau không tương đương sáu lần chạy của một cấu
+hình; một lần chạy không đủ để tính $s_m$.
+Kế hoạch khoảng tin cậy dùng bootstrap theo bệnh nhân: lấy mẫu lại bệnh
+nhân có hoàn lại, giữ các quan sát của người được chọn và tính lại chỉ số.
+Với các giá trị $m^{*(1)},\ldots,m^{*(B)}$, khoảng percentile 95\% là \cite{efron1986bootstrap}
+\begin{equation}
+ \mathrm{CI}_{95\%}=\left[Q_{0{,}025}(m^*),Q_{0{,}975}(m^*)\right],
+ \label{eq:metric-bootstrap}
+\end{equation}
+trong đó $Q_q$ là phân vị mức $q$ của phân bố bootstrap thực nghiệm.
+Quy trình báo cáo cần nêu $B$, cách xử lý mẫu lại thiếu một lớp và đơn vị đánh giá.
+So sánh ghép cặp dùng cùng mẫu lại cho hai mô hình rồi tính chênh lệch.
+Khoảng này đánh giá bất định lấy mẫu với mô hình cố định, không thay thế
+chạy lặp huấn luyện. Dữ liệu hiện có của luận văn không đủ để tính các khoảng này.
+
+\subsection{Chỉ số chất lượng ảnh}
+SNR, ENL, CNR và tương quan gradient $\beta$ được định nghĩa tại
+Mục~\ref{sec:denoise-metric-definitions}, gắn với vùng đo của Mục~\ref{sec:denoise-comparison-method}.
+Chúng mô tả biến đổi ảnh, không thay thế đánh giá phân loại.
+
+\section{NLM trong đối chứng tiền xử lý}
+Phần này cung cấp cơ sở cho bước tiền xử lý của quy trình đa nhánh.
+Việc lựa chọn bộ lọc cần được đối chứng trong bài toán phân loại.
+
+\subsection{Nhiễu speckle trong ảnh OCT}
+Do OCT là kỹ thuật tạo ảnh giao thoa sử dụng ánh sáng kết hợp thấp, ảnh thu được
+thường chứa nhiễu speckle. Thành phần nhiễu này tạo ra các biến thiên cường độ có
+dạng hạt, làm giảm độ tương phản giữa các lớp mô và có thể che khuất những cấu
+trúc nhỏ. Vì tín hiệu nhiễu có thể ảnh hưởng đến đặc trưng mà mạng học sâu trích
+xuất, luận văn khảo sát việc khử nhiễu trước khi huấn luyện thay vì mặc định rằng
+mạng sẽ tự học cách bỏ qua speckle.
+
+Non-Local Means (NLM) được Buades và cộng sự đề xuất dựa trên tính tự tương đồng
+của ảnh: giá trị mới tại một điểm ảnh được tính bằng trung bình có trọng số của
+các điểm ảnh có vùng lân cận tương tự, không chỉ của các điểm nằm gần về mặt
+không gian \cite{buades2005}. Với ảnh đầu vào $I$, dạng rời rạc của phép lọc có
+thể biểu diễn bởi
+\begin{equation}
+  \widehat{I}(p)=\frac{1}{Z(p)}
+  \sum_{q\in\Omega_p}
+  \exp\!\left(-\frac{\lVert P_p-P_q\rVert_2^2}{h^2}\right)I(q),
+  \label{eq:nlm}
+\end{equation}
+trong đó $P_p$ và $P_q$ là hai patch lần lượt có tâm tại $p$ và $q$,
+$\Omega_p$ là miền tìm kiếm, $h$ điều khiển mức suy giảm của trọng số và $Z(p)$
+là hệ số chuẩn hóa.
+
+\subsection{NLM trong khảo sát đối chứng}
+NLM có khả năng làm trơn những vùng nhiễu trong khi tận dụng các patch lặp lại
+để hạn chế làm mờ cấu trúc. Các biến thể NLM đã được nghiên cứu trực tiếp cho
+khử speckle trong ảnh OCT \cite{aum2015}. Tuy nhiên, NLM nguyên bản được xây
+dựng chủ yếu cho nhiễu cộng và việc lọc quá mạnh có thể loại bỏ đồng thời cả
+tín hiệu bệnh lý. Vì vậy, NLM trong luận văn được xem là một giả thuyết tiền xử
+lý cần kiểm chứng bằng đối chứng, không được mặc nhiên xem là cải thiện dữ liệu.
+Bộ lọc được chọn cho cấu hình mới là Bilateral tại
+Mục~\ref{sec:bilateral-selected}; NLM được giữ để đối chiếu kết quả trước đó.
+
+\section{Vai trò của khảo sát khử nhiễu}
+Khảo sát sáu bộ lọc trên 14 thể tích là cơ sở chính cho lựa chọn
+Bilateral; khảo sát bảy bộ lọc trên một thể tích được giữ làm bằng
+chứng bổ sung. Hai quy trình được phân biệt tại
+Phụ lục~\ref{app:denoise-support}. Các lần chạy NLM trước đó
+được giữ ở Mục~\ref{sec:sweep-3d-denoise-enc32} làm đối chứng lịch sử, không
+được xem là kết quả của Bilateral. So sánh phân loại trước--sau còn lại
+giữ cùng phân hoạch và kiến trúc nhưng không cùng ngân sách học;
+giới hạn suy luận về hiệu quả bộ lọc được nêu tại Mục~\ref{sec:final-denoise-plan}.
+
+\section{Thiết kế khảo sát các phương pháp khử nhiễu trên một khối ảnh OCT}
+\label{sec:denoise-comparison-method}
+
+\subsection{Mẫu khảo sát và quy trình xử lý thống nhất}
+Khảo sát bổ sung sử dụng khối ảnh \texttt{data\_2404} từ Harvard-GF,
+kích thước $200^3$, kiểu uint8, mang nhãn dương tính ($y=1$) theo nhật ký
+của tác giả. Không có ảnh sạch chuẩn đi kèm. Số liệu được cung cấp từ lần chạy
+\path{scripts/compare_denoise_methods.py}; số liệu này được ghi nhận
+theo nguồn cung cấp, với giới hạn là thiếu đối chiếu độc lập với mã lệnh, CSV và siêu dữ liệu gốc.
+Khảo sát chất lượng ảnh này tách biệt với kết quả phân loại của
+\texttt{denoise-enc-32} và các mô hình Nhóm A.
+
+Bảy bộ lọc được áp dụng hai chiều trên từng B-scan, lấy lát theo trục 0,
+rồi ghép lại thành khối ảnh. Đầu ra được đưa về thang $[0,255]$ của ảnh gốc
+để so sánh. Việc tái lập đòi hỏi xác định chính xác phép chuyển đổi, cắt ngưỡng và làm tròn về
+uint8; co giãn min--max riêng từng đầu ra không phù hợp vì có thể thay đổi
+các đại lượng đo. Với bộ lọc dùng đầu vào $[0,1]$, ảnh uint8 được chia cho
+255 trước khi xử lý. Thời gian ghi trong nhật ký đo trên máy cá nhân
+Windows, CPU 12 luồng, không phải thời gian GPU.
+
+\subsection{Các bộ lọc và cấu hình khảo sát}
+Bảng~\ref{tab:denoise-configs} ghi các tham số theo nguồn cung cấp. Khả năng
+tái lập còn bị giới hạn bởi thông tin thiếu về phiên bản thư viện, chế độ xử lý biên
+và số vòng lặp tối đa; các thông tin này cần được đối chiếu với cấu hình lần chạy,
+không suy ra từ giá trị mặc định của phiên bản mới.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.39\textwidth}>{\raggedright\arraybackslash}p{0.31\textwidth}@{}}
+  \caption{Các phương pháp và tham số trong khảo sát khối ảnh \texttt{data\_2404}}
+  \label{tab:denoise-configs}\\
+  \toprule
+  \textbf{Phương pháp} & \textbf{Tham số theo nhật ký} & \textbf{Cách triển khai}\\
+  \midrule\endfirsthead
+  \multicolumn{3}{c}{\textit{Bảng~\thetable{} (tiếp theo)}}\\
+  \toprule
+  \textbf{Phương pháp} & \textbf{Tham số theo nhật ký} & \textbf{Cách triển khai}\\
+  \midrule\endhead
+  \bottomrule\endfoot
+  Gaussian & $\sigma=1{,}5$ pixel & \path{skimage.filters.gaussian}\\
+  Median & Cửa sổ $3\times3$ & \path{skimage.filters.median}\\
+  Bilateral & \texttt{sigma\_color}=0,10; \texttt{sigma\_spatial}=4,0 & \path{denoise_bilateral}\\
+  TV--Chambolle & \texttt{weight}=0,10 & \path{denoise_tv_chambolle}\\
+  Wavelet & \texttt{db4}, ngưỡng mềm; \texttt{BayesShrink}; \texttt{rescale\_sigma=True} & \path{denoise_wavelet}\\
+  NLM & $h=0{,}10$; patch 5; khoảng tìm kiếm 3; \texttt{fast\_mode=True} & \path{denoise_nl_means}\\
+  BM3D & Profile \texttt{np}; \texttt{sigma\_psd}$\approx0{,}042$ & Gói \texttt{bm3d}\\
+\end{longtable}
+
+Gaussian và median là các đối chứng làm mịn đơn giản. Bilateral kết hợp
+trọng số khoảng cách không gian và khác biệt cường độ
+\cite{tomasi1998bilateral}. TV kết hợp điều chuẩn tổng biến phân với thành
+phần khớp dữ liệu của mô hình ROF; khảo sát dùng thuật toán Chambolle
+\cite{rudin1992tv,chambolle2004tv}. Tham số \texttt{weight}=0,10 được giữ
+theo API, không đồng nhất với $\lambda$ trong mọi cách viết hàm mục tiêu;
+trong tài liệu \texttt{denoise\_tv\_chambolle}, \texttt{weight} tương ứng
+$1/\lambda$ với quy ước ROF được trình bày tại đó \cite{skimageRestoration}.
+
+Wavelet dùng BayesShrink để chọn ngưỡng thích ứng cho các hệ số chi tiết
+\cite{chang2000wavelet}. NLM dùng độ tương tự giữa các patch
+\cite{buades2005}; với \texttt{patch\_distance}=3, tìm kiếm bị giới hạn
+trong lân cận quy định, không phải so khớp trên toàn ảnh
+\cite{skimageRestoration}. Việc coi cấu hình này trùng hoàn toàn với lần
+tiền xử lý NLM trước cần đối chiếu nhật ký, vì cùng $h$ không đủ xác nhận cùng
+thuật toán và tham số.
+
+BM3D gom các khối 2D tương tự thành nhóm ba chiều để lọc cộng tác trong
+miền biến đổi \cite{dabov2007bm3d}. Trong khảo sát này, thuật toán vẫn chạy
+độc lập trên từng B-scan; chữ ``3D'' không có nghĩa là lọc trực tiếp toàn
+khối ảnh OCT theo ba chiều không gian. Gói Python được dùng cung cấp giao diện gọi
+các tệp thực thi nhị phân BM3D, không phải giao diện gọi OpenCV \cite{bm3dSoftware}.
+Theo nhật ký, \texttt{sigma\_psd} lấy từ trung vị ước lượng trên 40 lát
+bằng \texttt{estimate\_sigma}, ở thang $[0,1]$. Đây là tham số nhiễu
+ước lượng để chạy bộ lọc, không phải phép đo trực tiếp nhiễu speckle thật.
+
+\subsection{Vùng đo và các chỉ số đánh giá}
+\label{sec:denoise-metric-definitions}
+Nhật ký ghi dải tín hiệu theo chiều sâu $[29,57)$, nền phía trên
+$[5,29)$, cắt 40 pixel ở biên ngang và dùng ngưỡng phân vị 60 của dải
+ảnh gốc, tương ứng $84/255$. Theo bản rà soát quy trình do tác giả
+cung cấp, chỉ ngưỡng cường độ được giữ chung; dải quanh đỉnh sáng
+và các pixel thuộc vùng tín hiệu/nền được xác định lại trên ảnh sau
+lọc. Vì vậy, các khoảng ghi trong nhật ký không xác nhận rằng mọi
+phương pháp sử dụng hoàn toàn cùng vùng đo. Dải được gọi là RNFL
+trong nhật ký không tương đương phân đoạn giải phẫu đã kiểm chứng. Trường
+\texttt{dz=1}, thứ tự trục và cách dựng mặt nạ cần được đối chiếu
+với mã đánh giá và siêu dữ liệu.
+
+Gọi $\mu_s,\sigma_s$ là trung bình và độ lệch chuẩn trên vùng tín hiệu,
+$\mu_b,\sigma_b$ là các đại lượng tương ứng trên nền. Với ảnh $I$ và vùng
+$R$ gồm $N_R$ voxel, định nghĩa moment theo vùng là
+\begin{equation}
+ \mu_R=\frac1{N_R}\sum_{v\in R}I(v),\qquad
+ \sigma_R=\sqrt{\frac1{N_R}\sum_{v\in R}[I(v)-\mu_R]^2}.
+ \label{eq:denoise-roi-moments}
+\end{equation}
+Áp dụng lần lượt cho vùng tín hiệu và nền được xác định ở từng đầu ra
+trong khảo sát ban đầu; không giả định các mặt nạ này trùng nhau.
+Mẫu số $N_R$ mô tả độ phân tán của vùng đang đo; nếu mã nguồn dùng
+$N_R-1$ để hiệu chỉnh phương sai mẫu thì phải ghi rõ và đối chiếu số liệu
+đã lưu. Vùng rỗng hoặc mẫu số bằng 0 làm chỉ số tương ứng không xác định.
+Theo định nghĩa thao tác của khảo sát,
+\begin{align}
+  \mathrm{SNR}_{\mathrm{ROI}}&=\frac{\mu_s}{\sigma_s},&
+  \mathrm{ENL}&=\left(\frac{\mu_s}{\sigma_s}\right)^2,\\
+  \mathrm{CNR}&=\frac{\mu_s-\mu_b}{\sqrt{\sigma_s^2+\sigma_b^2}}.
+  \label{eq:denoise-roi-metrics}
+\end{align}
+SNR này là tỷ số moment trong vùng đo, không phải SNR công suất ở đơn vị
+dB. ENL bằng bình phương SNR theo định nghĩa nên không phải một bằng chứng
+độc lập thứ hai. Độ biến thiên trong vùng mô chứa cả cấu trúc lẫn nhiễu;
+SNR hoặc ENL tăng có thể phản ánh làm phẳng cấu trúc thay vì chỉ giảm nhiễu.
+
+Chỉ số biên $\beta$ là tương quan giữa độ lớn gradient của ảnh gốc và ảnh
+sau lọc trên tập điểm biên mạnh được xác định từ ảnh gốc (nhóm 15\% cao
+nhất theo mô tả). Gọi tập này là $\mathcal B$, đặt
+$g_v=\|\nabla I_{\mathrm{goc}}(v)\|$ và
+$h_v=\|\nabla I_{\mathrm{loc}}(v)\|$; khi đó
+\begin{equation}
+ \beta=\frac{\sum_{v\in\mathcal B}(g_v-\overline g)(h_v-\overline h)}
+  {\sqrt{\sum_{v\in\mathcal B}(g_v-\overline g)^2}
+  \sqrt{\sum_{v\in\mathcal B}(h_v-\overline h)^2}},\quad
+ \overline g=\frac{\sum_{v\in\mathcal B}g_v}{|\mathcal B|},\quad
+ \overline h=\frac{\sum_{v\in\mathcal B}h_v}{|\mathcal B|}.
+ \label{eq:denoise-gradient-correlation}
+\end{equation}
+Khi xác định, $\beta\in[-1,1]$; gần 1 biểu thị tương quan thuận mạnh
+giữa hai trường độ lớn gradient. SNR và ENL lớn biểu thị độ biến thiên
+tương đối nhỏ trong vùng tín hiệu; CNR lớn biểu thị mức tách trung bình
+tín hiệu--nền so với độ phân tán kết hợp. Công thức CNR ở đây giữ dấu,
+không lấy trị tuyệt đối, phù hợp quy ước vùng tín hiệu sáng hơn nền.
+Không có ngưỡng chung để một trong bốn chỉ số xác nhận ảnh tối ưu.
+Việc tái lập phụ thuộc toán tử gradient, phạm vi chọn điểm biên, cách
+gộp chỉ số theo lát/khối ảnh và quy ước xử lý phương sai bằng không. Đây là chỉ số
+tham chiếu ảnh nhiễu gốc, không phải chỉ số hoàn toàn không tham chiếu.
+Tương quan cao chỉ cho biết mức tương đồng của mẫu biến thiên gradient,
+không bảo đảm bảo toàn độ lớn biên, tín hiệu bệnh lý hoặc RNFL.
+
+\subsection{Tái lập và giới hạn lựa chọn tiền xử lý}
+Kết quả được lưu trong thư mục \path{figures/denoise/}, gồm bảng
+\path{denoise_metrics_2404.csv}, siêu dữ liệu
+\path{denoise_compare_2404_all_meta.json} và cache đầu ra theo phương pháp.
+Thời gian tính bộ lọc khi chưa có cache khác với thời gian đọc cache.
+Việc đối chiếu chi phí đòi hỏi thông tin về CPU, RAM, số worker, số luồng mỗi worker,
+phiên bản gói và phạm vi tính thời gian tải dữ liệu/I/O.
+Các số đo này không so trực tiếp với khoảng 3,6 giờ tạo cache NLM đã nêu
+cho một quy trình và môi trường khác.
+
+Khảo sát một khối ảnh chỉ phục vụ thăm dò và không đủ để xác lập ưu
+thế của bộ lọc. Lựa chọn Bilateral hiện tại dựa thêm trên khảo sát
+14 thể tích ở Phụ lục~\ref{app:denoise-support}. Khối 2404 thuộc phân
+hoạch kiểm tra; việc tham khảo mẫu này trong lựa chọn tiền xử lý
+giới hạn tính độc lập của đánh giá trên chính phân hoạch đó. Đối
+chứng phân loại ghép cặp là bằng chứng còn thiếu, thuộc nghiên cứu
+ngoài phạm vi cuối cùng, không phải một lượt huấn luyện bổ sung
+cần thực hiện. Theo Mục~\ref{sec:final-denoise-plan}, chỉ còn một
+lượt tinh chỉnh 10 epoch trên ảnh khử nhiễu. SNR, ENL, CNR hay
+$\beta$ riêng lẻ không xác nhận lợi ích phân loại của bộ lọc.

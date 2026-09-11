@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="468pt" height="576pt" viewBox="0 0 468 576" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-11T04:29:27.134118</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.0, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 576 
+L 468 576 
+L 468 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 34.1991 484.722581 
+L 436.1409 484.722581 
+Q 454.2057 484.722581 454.2057 468 
+L 454.2057 49.935484 
+Q 454.2057 33.212903 436.1409 33.212903 
+L 34.1991 33.212903 
+Q 16.1343 33.212903 16.1343 49.935484 
+L 16.1343 468 
+Q 16.1343 484.722581 34.1991 484.722581 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #eef3e9"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 37.81206 127.486452 
+L 432.52794 127.486452 
+Q 434.10861 127.486452 434.10861 126.023226 
+L 434.10861 82.544516 
+Q 434.10861 81.08129 432.52794 81.08129 
+L 37.81206 81.08129 
+Q 36.23139 81.08129 36.23139 82.544516 
+L 36.23139 126.023226 
+Q 36.23139 127.486452 37.81206 127.486452 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #d4e3ed; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 235.17 60.387097 
+Q 235.17 70.83871 235.17 80.339994 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 236.97 76.739994 
+L 235.17 80.339994 
+L 233.37 76.739994 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 37.81206 194.376774 
+L 432.52794 194.376774 
+Q 434.10861 194.376774 434.10861 192.913548 
+L 434.10861 149.434839 
+Q 434.10861 147.971613 432.52794 147.971613 
+L 37.81206 147.971613 
+Q 36.23139 147.971613 36.23139 149.434839 
+L 36.23139 192.913548 
+Q 36.23139 194.376774 37.81206 194.376774 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #dce8d5; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 235.17 127.277419 
+Q 235.17 137.729032 235.17 147.230316 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 236.97 143.630316 
+L 235.17 147.230316 
+L 233.37 143.630316 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 37.81206 261.267097 
+L 432.52794 261.267097 
+Q 434.10861 261.267097 434.10861 259.803871 
+L 434.10861 216.325161 
+Q 434.10861 214.861935 432.52794 214.861935 
+L 37.81206 214.861935 
+Q 36.23139 214.861935 36.23139 216.325161 
+L 36.23139 259.803871 
+Q 36.23139 261.267097 37.81206 261.267097 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #dce8d5; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 235.17 194.167742 
+Q 235.17 204.619355 235.17 214.120639 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 236.97 210.520639 
+L 235.17 214.120639 
+L 233.37 210.520639 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 37.81206 328.157419 
+L 432.52794 328.157419 
+Q 434.10861 328.157419 434.10861 326.694194 
+L 434.10861 283.215484 
+Q 434.10861 281.752258 432.52794 281.752258 
+L 37.81206 281.752258 
+Q 36.23139 281.752258 36.23139 283.215484 
+L 36.23139 326.694194 
+Q 36.23139 328.157419 37.81206 328.157419 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #dce8d5; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 235.17 261.058065 
+Q 235.17 271.509677 235.17 281.010961 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 236.97 277.410961 
+L 235.17 281.010961 
+L 233.37 277.410961 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 37.81206 395.047742 
+L 432.52794 395.047742 
+Q 434.10861 395.047742 434.10861 393.584516 
+L 434.10861 350.105806 
+Q 434.10861 348.642581 432.52794 348.642581 
+L 37.81206 348.642581 
+Q 36.23139 348.642581 36.23139 350.105806 
+L 36.23139 393.584516 
+Q 36.23139 395.047742 37.81206 395.047742 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #dce8d5; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 235.17 327.948387 
+Q 235.17 338.4 235.17 347.901284 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 236.97 344.301284 
+L 235.17 347.901284 
+L 233.37 344.301284 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 37.81206 461.938065 
+L 432.52794 461.938065 
+Q 434.10861 461.938065 434.10861 460.474839 
+L 434.10861 416.996129 
+Q 434.10861 415.532903 432.52794 415.532903 
+L 37.81206 415.532903 
+Q 36.23139 415.532903 36.23139 416.996129 
+L 36.23139 460.474839 
+Q 36.23139 461.938065 37.81206 461.938065 
+z
+" clip-path="url(#padbb3cbb5d)" style="fill: #e4deed; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 235.17 394.83871 
+Q 235.17 405.290323 235.17 414.791607 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 236.97 411.191607 
+L 235.17 414.791607 
+L 233.37 411.191607 
+" clip-path="url(#padbb3cbb5d)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(154.435664 101.405958)">Stem: Conv s2 + norm / act + Conv s1</text>
+    <!-- $64\times112^2$ -->
+    <g style="fill: #20272c" transform="translate(214.38 115.242682)">
+     <text>
+      <tspan x="0" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">6</tspan>
+      <tspan x="5.249985" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">4</tspan>
+      <tspan x="12.599969" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">×</tspan>
+      <tspan x="21.41994" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="26.669925" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="31.91991" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="37.335269" y="-5.034375" style="font-size: 7.35px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(181.045781 167.243)">MaxViT stage 0: 2 blocks</text>
+    <!-- $64\times56^2$ -->
+    <g style="fill: #20272c" transform="translate(217.005 182.133005)">
+     <text>
+      <tspan x="0" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">6</tspan>
+      <tspan x="5.249985" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">4</tspan>
+      <tspan x="12.599969" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">×</tspan>
+      <tspan x="21.41994" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">5</tspan>
+      <tspan x="26.669925" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">6</tspan>
+      <tspan x="32.085285" y="-5.034375" style="font-size: 7.35px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(181.045781 234.133322)">MaxViT stage 1: 2 blocks</text>
+    <!-- $128\times28^2$ -->
+    <g style="fill: #20272c" transform="translate(214.38 249.023327)">
+     <text>
+      <tspan x="0" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="5.249985" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="10.499969" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">8</tspan>
+      <tspan x="17.849954" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">×</tspan>
+      <tspan x="26.669925" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="31.91991" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">8</tspan>
+      <tspan x="37.335269" y="-5.034375" style="font-size: 7.35px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(181.045781 301.023645)">MaxViT stage 2: 5 blocks</text>
+    <!-- $256\times14^2$ -->
+    <g style="fill: #20272c" transform="translate(214.38 315.91365)">
+     <text>
+      <tspan x="0" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="5.249985" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">5</tspan>
+      <tspan x="10.499969" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">6</tspan>
+      <tspan x="17.849954" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">×</tspan>
+      <tspan x="26.669925" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="31.91991" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">4</tspan>
+      <tspan x="37.335269" y="-5.034375" style="font-size: 7.35px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(181.045781 367.913967)">MaxViT stage 3: 2 blocks</text>
+    <!-- $512\times7^2$ -->
+    <g style="fill: #20272c" transform="translate(217.005 382.803972)">
+     <text>
+      <tspan x="0" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">5</tspan>
+      <tspan x="5.249985" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="10.499969" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="17.849954" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">×</tspan>
+      <tspan x="26.669925" y="-0.697875" style="font-size: 10.5px; font-family: 'STIXGeneral'; fill: #20272c">7</tspan>
+      <tspan x="32.085285" y="-5.034375" style="font-size: 7.35px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(155.386406 434.80429)">LayerNorm2d + average pool / flatten</text>
+    <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(197.114883 447.691912)">512-D embedding</text>
+   </g>
+   <g id="text_7">
+    <!-- $v_i:\;1\times224^2$ -->
+    <g style="fill: #20272c" transform="translate(204.57 48.044516)">
+     <text>
+      <tspan x="0" y="-0.367438" style="font-style: italic; font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">v</tspan>
+      <tspan x="5.328033" y="1.432562" style="font-style: italic; font-size: 8.4px; font-family: 'STIXGeneral'; fill: #20272c">i</tspan>
+      <tspan x="10.603254" y="-0.367438" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">:</tspan>
+      <tspan x="19.672643" y="-0.367438" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="28.072689" y="-0.367438" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">×</tspan>
+      <tspan x="38.152742" y="-0.367438" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="44.152788" y="-0.367438" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="50.152834" y="-0.367438" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">4</tspan>
+      <tspan x="56.34188" y="-5.323438" style="font-size: 8.4px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 13px; font-family: 'Times New Roman', 'DejaVu Serif', serif; text-anchor: middle; fill: #244c67" x="235.17" y="515.007634" transform="rotate(-0 235.17 515.007634)">(c) MaxViT-Tiny encoder (each view)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="padbb3cbb5d">
+   <rect x="9.36" y="14.4" width="451.62" height="518.4"/>
+  </clipPath>
+ </defs>
+</svg>

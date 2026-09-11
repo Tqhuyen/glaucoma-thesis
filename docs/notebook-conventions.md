@@ -51,6 +51,35 @@ hardcode 200), `MODEL_RES3D`/`RES2D`, epochs, batch_size, grad_accum, lr, weight
 `SAVE_DIR`/`DRIVE_DIR`/`RUN_GROUP`, spec/tier, cờ `RUN_XAI`, env override. Validate sớm (fail fast) trước khi
 build data/model; đổi `RUN_GROUP` khi đổi cấu hình train.
 
+**Chia nhóm tham số trong cell config bằng dòng `#` (bắt buộc).** Cell config phải chia thành các nhóm rõ ràng,
+mỗi nhóm mở đầu bằng một dòng comment `#` mô tả **mục đích** và **mức độ được phép sửa**, để người đọc biết
+cần cấu hình gì ở đâu và **không sửa nhầm sang phần đã ổn định**. Mẫu nhóm:
+
+```python
+# ===== RUN IDENTITY & RESUME (edit only when starting a new experiment) =====
+RUN_GROUP = ...
+RUN_TARGET = ...
+RESUME = False
+# ===== STAGE SWITCHES (enable only the stages you intend to run) =====
+ENABLE_TRAIN = ...
+ENABLE_EVAL = ...
+RUN_XAI = ...
+# ===== DATA SOURCES & IMPORT (HF repos, import/publish cache) =====
+HF_DN_REPO = ...
+PUBLISH_DATA_CACHE = ...
+# ===== FROZEN STUDY CONFIG (validated for this study; do not retune) =====
+EPOCHS, BS, GRAD_ACCUM = ...
+LR, WD, PATIENCE = ...
+# ===== WARM-START PARENT (pinned weights; do not substitute) =====
+WARM_START_WEIGHTS = ...
+# ===== DERIVED PATHS & DRIVE (computed from the above; do not edit) =====
+```
+
+- Nhóm **cần cấu hình** (identity, stage switches, data sources) ghi rõ `edit`/`set ...`.
+- Nhóm **đã cố định** (hyperparameter đã chốt, parent weights, đường dẫn suy ra) ghi rõ `FROZEN`/`do not edit`.
+- Comment `#` không được làm hỏng việc parse/exec cell hay test hiện có; giữ nguyên thứ tự các tham số mà
+  test/notebook phụ thuộc. Nếu đổi thứ tự nhóm, cập nhật test tương ứng.
+
 ### 2.4 Data
 - **Resolution linh hoạt theo config**: storage ở `STORE_RES` có thể là 200, 128, 96, … tùy bài toán; model input
   (`RES3D`/`RES2D`) khai báo riêng và resize on-the-fly. Không hardcode 200; kiểm tra shape theo `STORE_RES`.
@@ -256,6 +285,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 ## 4. Checklist trước khi giao notebook
 
 - [ ] Đúng thứ tự cell mục 1; config một nguồn duy nhất, có env override.
+- [ ] **Cell config chia nhóm bằng dòng `#`** (nhóm cần sửa vs. `FROZEN`/derived), để biết cần cấu hình gì ở đâu và không sửa nhầm phần đã ổn.
 - [ ] Cell tách theo thành phần (mỗi cell 1 việc/nhóm việc), chạy lại được từng cell khi debug/sửa lỗi.
 - [ ] Model load từ path trước (`WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi chưa có weights.
 - [ ] `*_SMOKE=1` chạy hết cell trên CPU, synthetic, không download — pass.

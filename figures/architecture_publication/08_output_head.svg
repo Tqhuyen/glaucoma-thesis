@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="396pt" height="540pt" viewBox="0 0 396 540" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-11T04:29:28.590605</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.0, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 540 
+L 396 540 
+L 396 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 40.4019 423.802016 
+L 357.5781 423.802016 
+Q 372.8637 423.802016 372.8637 409.082661 
+L 372.8637 44.778629 
+Q 372.8637 30.059274 357.5781 30.059274 
+L 40.4019 30.059274 
+Q 25.1163 30.059274 25.1163 44.778629 
+L 25.1163 409.082661 
+Q 25.1163 423.802016 40.4019 423.802016 
+z
+" clip-path="url(#p7540cead69)" style="fill: #eaf1f5"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 54.92322 330.150121 
+L 343.05678 330.150121 
+Q 344.39427 330.150121 344.39427 328.862177 
+L 344.39427 286.912016 
+Q 344.39427 285.624073 343.05678 285.624073 
+L 54.92322 285.624073 
+Q 53.58573 285.624073 53.58573 286.912016 
+L 53.58573 328.862177 
+Q 53.58573 330.150121 54.92322 330.150121 
+z
+" clip-path="url(#p7540cead69)" style="fill: #dce8d5; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 198.99 385.16371 
+Q 198.99 357.564919 198.99 330.916458 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 197.19 334.516458 
+L 198.99 330.916458 
+L 200.79 334.516458 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 54.92322 245.513831 
+L 343.05678 245.513831 
+Q 344.39427 245.513831 344.39427 244.225887 
+L 344.39427 202.275726 
+Q 344.39427 200.987782 343.05678 200.987782 
+L 54.92322 200.987782 
+Q 53.58573 200.987782 53.58573 202.275726 
+L 53.58573 244.225887 
+Q 53.58573 245.513831 54.92322 245.513831 
+z
+" clip-path="url(#p7540cead69)" style="fill: #d4e3ed; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 198.99 285.808065 
+Q 198.99 265.568952 198.99 246.280168 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 197.19 249.880168 
+L 198.99 246.280168 
+L 200.79 249.880168 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 198.99 201.171774 
+Q 198.99 177.252823 198.99 154.2842 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke-dasharray: 3.4,2.55; stroke-dashoffset: 0; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 197.19 157.8842 
+L 198.99 154.2842 
+L 200.79 157.8842 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke-dasharray: 3.4,2.55; stroke-dashoffset: 0; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 54.92322 153.517863 
+L 343.05678 153.517863 
+Q 344.39427 153.517863 344.39427 152.229919 
+L 344.39427 106.599919 
+Q 344.39427 105.311976 343.05678 105.311976 
+L 54.92322 105.311976 
+Q 53.58573 105.311976 53.58573 106.599919 
+L 53.58573 152.229919 
+Q 53.58573 153.517863 54.92322 153.517863 
+z
+" clip-path="url(#p7540cead69)" style="fill: #e4deed; stroke: #20272c; stroke-width: 0.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 198.99 105.495968 
+Q 198.99 90.776613 198.99 77.007587 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke-dasharray: 3.4,2.55; stroke-dashoffset: 0; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+    <path d="M 197.19 80.607587 
+L 198.99 77.007587 
+L 200.79 80.607587 
+" clip-path="url(#p7540cead69)" style="fill: none; stroke-dasharray: 3.4,2.55; stroke-dashoffset: 0; stroke: #20272c; stroke-width: 0.85; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 12px; font-family: 'Times New Roman', 'DejaVu Serif', serif; text-anchor: middle; fill: #20272c" x="198.99" y="311.970847" transform="rotate(-0 198.99 311.970847)">Linear 256 to 2</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 11px; font-family: 'Times New Roman', 'DejaVu Serif', serif; text-anchor: middle; fill: #20272c" x="198.99" y="225.883072" transform="rotate(-0 198.99 225.883072)">Raw logits (B, 2)</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 12px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(170.10375 124.922126)">Divide by T</text>
+    <text style="font-size: 12px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #20272c" transform="translate(178.658437 140.848962)">Softmax</text>
+   </g>
+   <g id="text_4">
+    <!-- $z\;(B,256)$ -->
+    <g style="fill: #20272c" transform="translate(173.64 403.198065)">
+     <text>
+      <tspan x="0" y="-0.0625" style="font-style: italic; font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">z</tspan>
+      <tspan x="12.997157" y="-0.0625" style="font-style: italic; font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">B</tspan>
+      <tspan x="8.668147" y="-0.0625" style="font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">(</tspan>
+      <tspan x="20.940165" y="-0.0625" style="font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">,</tspan>
+      <tspan x="26.790165" y="-0.0625" style="font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">2</tspan>
+      <tspan x="33.290165" y="-0.0625" style="font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">5</tspan>
+      <tspan x="39.790165" y="-0.0625" style="font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">6</tspan>
+      <tspan x="46.290165" y="-0.0625" style="font-size: 13px; font-family: 'STIXGeneral'; fill: #20272c">)</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_5">
+    <!-- $P(y=0),\;P(y=1)$ -->
+    <g style="fill: #20272c" transform="translate(154.95 53.118387)">
+     <text>
+      <tspan x="0" y="-0.890625" style="font-style: italic; font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">P</tspan>
+      <tspan x="11.328079" y="-0.890625" style="font-style: italic; font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">y</tspan>
+      <tspan x="48.405629" y="-0.890625" style="font-style: italic; font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">P</tspan>
+      <tspan x="59.733708" y="-0.890625" style="font-style: italic; font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">y</tspan>
+      <tspan x="7.332047" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">(</tspan>
+      <tspan x="19.056113" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">=</tspan>
+      <tspan x="29.676175" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">0</tspan>
+      <tspan x="35.676221" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">)</tspan>
+      <tspan x="39.672253" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">,</tspan>
+      <tspan x="55.737675" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">(</tspan>
+      <tspan x="67.461741" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">=</tspan>
+      <tspan x="78.081804" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">1</tspan>
+      <tspan x="84.081849" y="-0.890625" style="font-size: 12px; font-family: 'STIXGeneral'; fill: #20272c">)</tspan>
+     </text>
+    </g>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 13px; font-family: 'Times New Roman', 'DejaVu Serif', serif; text-anchor: middle; fill: #244c67" x="198.99" y="454.523853" transform="rotate(-0 198.99 454.523853)">(c) Classification head</text>
+   </g>
+  </g>
+  <g id="text_7">
+   <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #52606b" transform="translate(9.9 512.190264)">Dashed path: post-hoc calibration.</text>
+   <text style="font-size: 10.5px; font-family: 'Times New Roman', 'DejaVu Serif', serif; fill: #52606b" transform="translate(9.9 526.5)">T is fitted on validation logits; it is not a model layer.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p7540cead69">
+   <rect x="7.92" y="13.5" width="382.14" height="456.3"/>
+  </clipPath>
+ </defs>
+</svg>

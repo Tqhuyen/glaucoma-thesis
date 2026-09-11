@@ -1,0 +1,103 @@
+{
+  "code_verification": {
+    "torch": "2.13.0+cpu",
+    "timm": "1.0.29",
+    "parameters": 58304467,
+    "parameters_per_maxvit": 28543736,
+    "unused_g3_parameters": 1600,
+    "3d_stage_shapes_meta": [
+      [
+        1,
+        32,
+        200,
+        200,
+        200
+      ],
+      [
+        1,
+        64,
+        100,
+        100,
+        100
+      ],
+      [
+        1,
+        64,
+        100,
+        100,
+        100
+      ],
+      [
+        1,
+        128,
+        50,
+        50,
+        50
+      ],
+      [
+        1,
+        128,
+        50,
+        50,
+        50
+      ],
+      [
+        1,
+        192,
+        25,
+        25,
+        25
+      ],
+      [
+        1,
+        192,
+        25,
+        25,
+        25
+      ]
+    ],
+    "maxvit_stage_shapes_cpu": {
+      "0": [
+        1,
+        64,
+        56,
+        56
+      ],
+      "1": [
+        1,
+        128,
+        28,
+        28
+      ],
+      "2": [
+        1,
+        256,
+        14,
+        14
+      ],
+      "3": [
+        1,
+        512,
+        7,
+        7
+      ]
+    },
+    "maxvit_final_norm": "LayerNorm2d",
+    "crossgate_equation_test": "passed",
+    "full_model_test_input": "synthetic 16^3 volume + two 224^2 images; pretrained=False",
+    "source_sha256": {
+      "scripts\\final_model.py": "7e9fc3f803927565e6b440601ade298167f44664298781a7572624783f970154",
+      "notebooks\\3d_glaucoma_final_2x2d_3d_crossgate.ipynb": "5bff9ce7804bc7458c46e25ab9a8237a39e360f4cc2d6810e5e79dd1b0e69d78"
+    }
+  },
+  "layout": {
+    "texts_checked": 59,
+    "blocks_checked": 33,
+    "overlaps": 0
+  },
+  "texture_source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2404.npy",
+  "depth_axis": 1,
+  "texture_sha256": "08adf96bad18e6b6335d90ae11f165d5a0437dd7511e0f7813948d4be15a7a75",
+  "feature_map_textures": "schematic grids; not activations",
+  "projection_previews": "raw 200-square views displayed as thumbnails; model resizes to 224"
+}

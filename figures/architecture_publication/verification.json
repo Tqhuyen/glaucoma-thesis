@@ -1,0 +1,195 @@
+{
+  "code_verification": {
+    "torch": "2.13.0+cpu",
+    "timm": "1.0.29",
+    "parameters": 58304467,
+    "parameters_per_maxvit": 28543736,
+    "unused_g3_parameters": 1600,
+    "3d_stage_shapes_meta": [
+      [
+        1,
+        32,
+        200,
+        200,
+        200
+      ],
+      [
+        1,
+        64,
+        100,
+        100,
+        100
+      ],
+      [
+        1,
+        64,
+        100,
+        100,
+        100
+      ],
+      [
+        1,
+        128,
+        50,
+        50,
+        50
+      ],
+      [
+        1,
+        128,
+        50,
+        50,
+        50
+      ],
+      [
+        1,
+        192,
+        25,
+        25,
+        25
+      ],
+      [
+        1,
+        192,
+        25,
+        25,
+        25
+      ]
+    ],
+    "maxvit_stage_shapes_cpu": {
+      "0": [
+        1,
+        64,
+        56,
+        56
+      ],
+      "1": [
+        1,
+        128,
+        28,
+        28
+      ],
+      "2": [
+        1,
+        256,
+        14,
+        14
+      ],
+      "3": [
+        1,
+        512,
+        7,
+        7
+      ]
+    },
+    "maxvit_final_norm": "LayerNorm2d",
+    "crossgate_equation_test": "passed",
+    "full_model_test_input": "synthetic 16^3 volume + two 224^2 images; pretrained=False",
+    "source_sha256": {
+      "scripts\\final_model.py": "7e9fc3f803927565e6b440601ade298167f44664298781a7572624783f970154",
+      "notebooks\\3d_glaucoma_final_2x2d_3d_crossgate.ipynb": "5bff9ce7804bc7458c46e25ab9a8237a39e360f4cc2d6810e5e79dd1b0e69d78"
+    }
+  },
+  "layout_checks": {
+    "01_model_plate": {
+      "texts_checked": 39,
+      "blocks_checked": 17,
+      "overlaps": 0,
+      "page_inches": [
+        15.0,
+        7.4
+      ],
+      "minimum_font_pt": 10.0
+    },
+    "02_crossgate": {
+      "texts_checked": 12,
+      "blocks_checked": 3,
+      "overlaps": 0,
+      "page_inches": [
+        6.5,
+        7.5
+      ],
+      "minimum_font_pt": 10.0
+    },
+    "03_encoder_details": {
+      "texts_checked": 27,
+      "blocks_checked": 19,
+      "overlaps": 0,
+      "page_inches": [
+        15.0,
+        8.5
+      ],
+      "minimum_font_pt": 9.5
+    },
+    "04_resnext3d": {
+      "texts_checked": 8,
+      "blocks_checked": 6,
+      "overlaps": 0,
+      "page_inches": [
+        6.5,
+        8.0
+      ],
+      "minimum_font_pt": 10.5
+    },
+    "05_residual_block": {
+      "texts_checked": 10,
+      "blocks_checked": 7,
+      "overlaps": 0,
+      "page_inches": [
+        6.5,
+        8.0
+      ],
+      "minimum_font_pt": 9.5
+    },
+    "06_maxvit": {
+      "texts_checked": 8,
+      "blocks_checked": 6,
+      "overlaps": 0,
+      "page_inches": [
+        6.5,
+        8.0
+      ],
+      "minimum_font_pt": 10.5
+    },
+    "07_overview": {
+      "texts_checked": 20,
+      "blocks_checked": 11,
+      "overlaps": 0,
+      "page_inches": [
+        8.0,
+        8.0
+      ],
+      "minimum_font_pt": 10.0
+    },
+    "08_output_head": {
+      "texts_checked": 7,
+      "blocks_checked": 3,
+      "overlaps": 0,
+      "page_inches": [
+        5.5,
+        7.5
+      ],
+      "minimum_font_pt": 10.5
+    },
+    "09_end_to_end": {
+      "texts_checked": 25,
+      "blocks_checked": 22,
+      "overlaps": 0,
+      "page_inches": [
+        12.5,
+        14.5
+      ],
+      "minimum_font_pt": 10.5
+    },
+    "11_end_to_end_thesis": {
+      "texts_checked": 20,
+      "blocks_checked": 17,
+      "overlaps": 0,
+      "page_inches": [
+        6.3,
+        8.0
+      ],
+      "minimum_font_pt": 9.5
+    }
+  }
+}
