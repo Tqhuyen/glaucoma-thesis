@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOW = ["*_volumes_dn.npy", "*_labels.npy", "manifest.json", "README.md"]
+ALLOW = ["*_volumes_dn.npy", "*_labels.npy", "*_complete.json", "manifest.json", "README.md"]
 
 
 def main():

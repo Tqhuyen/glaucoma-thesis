@@ -308,3 +308,10 @@ def test_split_writer_rejects_completed_shape_dtype_mismatch(writer_factory, mis
 
     assert [path.read_bytes() for path in paths] == before
     assert not writer.partial.exists()
+
+
+def test_uploader_includes_completion_markers():
+    from scripts import upload_bilateral_hf
+
+    required = {"*_volumes_dn.npy", "*_labels.npy", "*_complete.json", "manifest.json", "README.md"}
+    assert required <= set(upload_bilateral_hf.ALLOW)
