@@ -11,10 +11,10 @@ mô hình trong repo. Nguồn tham chiếu chính là notebook sweep 2D–3D fus
 Thứ tự dưới đây lấy từ sweep notebook; notebook train đơn lẻ có thể bỏ các phần sweep/X-AI nhưng
 **không được bỏ** phần 2–4, 9, 11–12.
 
-**Nguyên tắc chia cell:** mỗi cell làm **một việc** hoặc một nhóm việc cùng loại (setup, config, data,
-dataset/loader, model, train, metrics, X-AI, phân tích, reporting) — không gộp nhiều thành phần nặng vào một cell.
-Giữ cell ngắn, ít side effect chéo, biến trung gian ở global để có thể **chạy lại đúng cell đó** khi debug/sửa lỗi
-thay vì chạy lại cả notebook. Cell quá dài (> ~80 dòng) nên tách theo thành phần và đặt markdown heading rõ ràng.
+**Nguyên tắc chia cell:** mỗi cell làm **một việc** hoặc một nhóm việc cùng loại; tách cả **data**, **train**,
+**eval**, **info/X-AI** và reporting — không chỉ tách riêng phần info. Giữ cell ngắn, ít side effect chéo, biến
+trung gian ở global để có thể **chạy lại đúng cell đó** khi debug/sửa lỗi thay vì chạy lại cả notebook. Cell quá
+dài (> ~80 dòng) phải tách theo bước và đặt markdown heading rõ ràng.
 
 | # | Cell | Nội dung | Ví dụ trong sweep |
 |---|---|---|---|
@@ -32,6 +32,27 @@ thay vì chạy lại cả notebook. Cell quá dài (> ~80 dòng) nên tách the
 | 11b | Phân tích tùy chọn (nếu có) | Info-theory/embedding analysis chạy **trong cùng notebook** qua cờ `RUN_INFO`; logic ở `scripts/information_theory.py` | `3d_glaucoma_train_3branch_crossgate.ipynb` |
 | 12 | Chạy + reporting | Chạy sweep/train, render bảng CSV, W&B table/scalar, markdown report, **Drive sync + `run.finish()`** | Cell 39–49 |
 | 13 | Notes/limitations (markdown) | Cảnh báo single-seed, metric thiếu ghi `—`, confound, cách resume | Cell 50 |
+
+### 1.1 Chia nhỏ cell theo từng bước (bắt buộc)
+
+| Nhóm | Cell nhỏ | Nội dung |
+|---|---|---|
+| Data | D1 tải dữ liệu | HF auth (`HF_TOKEN`) + `allow_patterns`, chỉ tải split/pattern dùng đến |
+| | D2 build/denoise | build storage ở `STORE_RES` (idempotent) hoặc khối denoise (partial + completion marker) |
+| | D3 view cache | chiếu en-face + depth-axis, cache một lần per split, identity theo source/res |
+| | D4 dataset/loader | memmap per-sample, augmentation deterministic, smoke synthetic; loader lazy/cache |
+| Train | T1 model | build model **hoặc load weights từ path trước** (`ft.load_weights`), chỉ tạo mới khi chưa có |
+| | T2 trainer | `Trainer` + optimizer/scheduler/AMP, probe batch size theo VRAM (`ft.find_batch_size`) |
+| | T3 fit | vòng `fit()` + callback eval (val/test định nghĩa ở cell riêng) |
+| Eval | E1 val callback | full metrics trên val mỗi epoch |
+| | E2 test callback | full metrics trên test mỗi epoch |
+| | E3 calibrated report | temperature + threshold fit trên val; calibrated `train/val/test` + bootstrap CI |
+| | E4 log bảng | `log_report` + history table + scalar summary (không vẽ đồ thị metrics) |
+| | E5 X-AI | heatmap PNG + `xai/fusion_table` + `xai/*` (khi `RUN_XAI`) |
+| | E6 info | 7 cell như mục 2.11b (khi `RUN_INFO`) |
+
+Có thể gộp 2–3 cell nhỏ nếu rất ngắn, nhưng **không được gộp data/train/eval chung một cell**. Áp dụng cho
+notebook mới và mỗi lần sửa notebook; notebook cũ refactor dần khi có dịp.
 
 ## 2. Chi tiết từng mục
 
@@ -97,6 +118,9 @@ Nhịp log (train từng bước, val/test từng epoch):
   `train|val|test/<metric>` (+ `_lo`/`_hi` cho CI).
 - **Chỉ số không vẽ đồ thị**: log bằng W&B Table/số (`report/split_table`, `report/history_table`, `report/*_table`)
   và summary; không tạo PNG cho metrics (ROC/PR/calibration/confusion/history). Đồ thị chỉ dành cho X-AI/ảnh.
+- **Thời gian epoch**: mỗi epoch log `train/epoch_seconds` lên W&B và in `[train] epoch N done in Xs`; dùng để đo
+  `sec/epoch`, ước lượng budget và so sánh tốc độ giữa các cấu hình (không đưa wall-clock vào `history` để giữ
+  tính tái lập khi resume).
 - AUC/PR-AUC trên cửa sổ nhỏ có thể NaN khi cửa sổ chỉ có một lớp — đọc xu hướng theo epoch, đừng chọn theo bước.
 
 ### 2.9 Probe + train loop
@@ -247,16 +271,36 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Notebook mới phải pass `*_SMOKE=1` (CPU, synthetic) và checklist mục 4 trước khi giao.
 
 ### 3.12 Chia cell nhỏ theo thành phần
-- Mỗi cell một việc/nhóm việc giống nhau (setup, config, data, loader, model, train, metrics, X-AI, phân tích,
-  reporting); không nhồi nhiều thành phần vào cùng cell.
+- Mỗi cell một việc/nhóm việc giống nhau; tách tối thiểu theo bảng 1.1: **data** (tải / build-denoise / view /
+  dataset-loader), **train** (model / trainer+batch probe / vòng fit), **eval** (val callback / test callback /
+  calibrated report / log bảng / X-AI / info).
+- Không gộp data + train + eval vào cùng một cell; định nghĩa callback eval ở cell riêng thay vì nhét vào cell train.
+- **Bắt buộc thấy rõ trong notebook**: D1–D4, T1–T3, E1–E6 phải là **cell riêng có markdown heading** (ví dụ
+  `### D1 - Download`, `### T1 - Model`, `### E1/E2 - Val/test callbacks`, `### T3 - Training loop`), không chỉ liệt
+  kê trong tài liệu; data/train/eval gộp chung một cell là **chưa đạt**.
 - Cell nên chạy lại độc lập khi debug; biến trung gian giữ ở global; đặt markdown heading cho từng phần.
 - Model: load từ path trước (`ft.load_weights`, `WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi path
   chưa có (và khi đó mới tải pretrained backbone).
+
+### 3.13 Log trạng thái từng bước
+- Mỗi bước in **một dòng trạng thái** có tiền tố rõ: `[data]`, `[denoise]`, `[views]`, `[dataset]`, `[cache]`,
+  `[model]`, `[batch]`, `[wandb]`, `[train]`, `[eval]`, `[checkpoint]`, `[report]`, `[xai]`, `[info]`, `[sync]`.
+- Log các mốc: tải/cache data (số pattern, cache hit hay tải mới), build denoise/views (cache hit hay tạo mới, số
+  mẫu), dataset (n + số positive mỗi split, resolution), model (load từ path hay khởi tạo mới, params), batch probe
+  (BS/peak GB/budget), train start (device, epochs, effective batch, workers), mỗi epoch (history +
+  `train/epoch_seconds` + `[train] epoch N done in Xs`), checkpoint (file đã lưu), calibrated report
+  (temperature/threshold + test/val AUC/F1), X-AI/info bắt đầu–kết thúc, sync Drive + finish.
+- Log **ngắn gọn, không trùng** với W&B (W&B vẫn là nguồn số liệu chính); không in trong vòng lặp micro-batch.
+- Ưu tiên log trong shared helper (`scripts/*.py`) để mọi notebook cùng format; notebook in thêm mốc riêng.
 
 ## 4. Checklist trước khi giao notebook
 
 - [ ] Đúng thứ tự cell mục 1; config một nguồn duy nhất, có env override.
 - [ ] Cell tách theo thành phần (mỗi cell 1 việc/nhóm việc), chạy lại được từng cell khi debug/sửa lỗi.
+- [ ] Tách cell data (tải/build-denoise/view/dataset-loader), train (model/trainer-probe/fit) và eval (val callback, test callback, calibrated report, log bảng) theo bảng 1.1.
+- [ ] Kiểm tra notebook thực tế có cell riêng + markdown heading cho D1–D4/T1–T3/E1–E6 (không gộp data/train/eval), không chỉ ghi trong tài liệu.
+- [ ] Mỗi bước in log trạng thái có tiền tố (`[data]`/`[model]`/`[train]`/`[eval]`/`[xai]`/...) để theo dõi và debug.
+- [ ] Mỗi epoch log thời gian hoàn thành (`train/epoch_seconds` + in `[train] epoch N done in Xs`) để đo `sec/epoch`.
 - [ ] Model load từ path trước (`WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi chưa có weights.
 - [ ] `*_SMOKE=1` chạy hết cell trên CPU, synthetic, không download — pass.
 - [ ] W&B init + log live đúng prefix + figures as `wandb.Image` + `summary.update` + `finish`.

@@ -755,3 +755,47 @@ def test_remote_threebranch_notebook_smoke_compatibility(monkeypatch):
             exec(compile("".join(cell["source"]), f"<threebranch-cell-{index}>", "exec"), namespace)
     assert namespace["RESULTS"]
     assert (namespace["LAST"]["artifacts"].local / "info_theory.pt").exists()
+
+
+def test_fetch_copies_remote_artifact_once(tmp_path):
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    artifacts = ft.Artifacts(tmp_path / "local", remote)
+    ft.atomic_save({"value": 1}, remote / "last.pt")
+    path = artifacts.fetch("last.pt")
+    assert path == artifacts.local / "last.pt"
+    assert torch.load(path, weights_only=False)["value"] == 1
+    assert artifacts.fetch("missing.pt") == artifacts.local / "missing.pt"
+    assert not (artifacts.local / "missing.pt").exists()
+
+
+def test_trainer_resumes_from_remote_checkpoint(tmp_path):
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    source = ft.Artifacts(tmp_path / "source", remote)
+    current = ft.Trainer(ft.SmokeModel(), Data(), config(), source, Run())
+    assert current.fit(evaluate)
+    assert not (tmp_path / "fresh" / "last.pt").exists()
+    fresh = ft.Artifacts(tmp_path / "fresh", remote)
+    resumed = ft.Trainer(ft.SmokeModel(), Data(), config(), fresh, Run(), resume=True)
+    assert resumed.epoch == current.epoch == 2
+    assert (fresh.local / "last.pt").exists()
+
+
+def test_saved_config_reads_first_existing_root(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    ft.Artifacts(first, smoke=True).save({"id": "a", "config": {"batch_size": 2}}, "run_identity.pt")
+    ft.Artifacts(second, smoke=True).save({"id": "b", "config": {"batch_size": 4}}, "run_identity.pt")
+    assert ft.saved_config(first, second) == {"batch_size": 2}
+    assert ft.saved_config(tmp_path / "missing", second) == {"batch_size": 4}
+    assert ft.saved_config(tmp_path / "missing") is None
+
+
+def test_run_status_mismatch_reports_differing_keys(tmp_path):
+    cfg = config()
+    artifacts = ft.Artifacts(tmp_path, smoke=True)
+    artifacts.save({"id": Run.id, "config": cfg, "warm_start": ""}, "run_identity.pt")
+    changed = config()
+    changed["batch_size"] = 8
+    with pytest.raises(ValueError, match="batch_size"):
+        ft.run_status(artifacts, changed, resume=True)
