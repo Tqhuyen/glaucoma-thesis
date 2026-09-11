@@ -263,7 +263,15 @@ class Trainer:
         self.model, self.dataset, self.config = model, dataset, copy.deepcopy(config)
         self.artifacts, self.run = artifacts, run
         self.device = next(model.parameters()).device
-        self.optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"])
+        self.amp_dtype = getattr(torch, config.get("amp_dtype", "float16"))
+        if self.amp_dtype not in (torch.float16, torch.bfloat16):
+            raise ValueError("amp_dtype must be float16 or bfloat16")
+        self.optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config["lr"],
+            weight_decay=config["weight_decay"],
+            **({"fused": True} if config.get("fused_adamw", False) else {}),
+        )
         steps = math.ceil(math.ceil(len(dataset) / config["batch_size"]) / config["grad_accum"]) * config["epochs"]
         warm = int(steps * 0.05)
 
@@ -273,7 +281,12 @@ class Trainer:
             return 0.5 * (1 + math.cos(math.pi * min(step - warm, steps - warm) / max(steps - warm, 1)))
 
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, schedule)
-        self.scaler = torch.amp.GradScaler("cuda", enabled=self.device.type == "cuda")
+        self.scaler = torch.amp.GradScaler(
+            "cuda", enabled=self.device.type == "cuda" and self.amp_dtype == torch.float16
+        )
+        self.confusion = [0, 0, 0, 0]
+        self.scaler_skips = 0
+        self.best_epoch = self.best_step = None
         self.epoch, self.cursor, self.step = 0, 0, 0
         self.loss_sum, self.weight_sum, self.correct, self.seen = 0.0, 0.0, 0, 0
         self.history, self.best_state, self.best_auc, self.bad = [], None, -math.inf, 0
@@ -314,6 +327,9 @@ class Trainer:
             ):
                 setattr(self, key, state[key])
             restore_rng(state["rng"])
+            for key in ("confusion", "scaler_skips", "best_epoch", "best_step"):
+                if key in state:
+                    setattr(self, key, state[key])
         elif warm_start:
             weights = torch.load(warm_start, map_location="cpu", weights_only=True)
             if isinstance(weights, dict) and "weights" in weights:
@@ -350,6 +366,10 @@ class Trainer:
             )
         }
         state.update(
+            confusion=self.confusion,
+            scaler_skips=self.scaler_skips,
+            best_epoch=self.best_epoch,
+            best_step=self.best_step,
             format=1,
             config=self.config,
             run_id=self.run.id,
@@ -360,12 +380,14 @@ class Trainer:
             rng=rng_state(),
         )
         self.artifacts.save(state, "last.pt")
+        if (self.artifacts.local / "steps.jsonl").exists():
+            self.artifacts.sync(self.artifacts.local / "steps.jsonl")
         if best:
             self.artifacts.save(state, "best.pt")
 
     @contextlib.contextmanager
     def interrupts(self):
-        previous = signal.getsignal(signal.SIGINT)
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
 
         def request_stop(signum, frame):
             if self.stop_requested:
@@ -376,16 +398,22 @@ class Trainer:
                 flush=True,
             )
 
-        signal.signal(signal.SIGINT, request_stop)
+        for sig in previous:
+            signal.signal(sig, request_stop)
         try:
             yield
         finally:
-            signal.signal(signal.SIGINT, previous)
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
 
     def fit(self, evaluate, *, boundary_hook=None):
         if self.failed:
             raise RuntimeError("Failed trainer may hold partial state; construct a new Trainer with resume=True")
         try:
+            started = time.monotonic()
+            fit_started = started
+            last_sync = started
+            initial_seen = self.seen
             with self.interrupts():
                 self.commit()
                 weights = torch.as_tensor(self.config["class_weights"], dtype=torch.float32, device=self.device)
@@ -401,21 +429,29 @@ class Trainer:
                         Subset(self.dataset, self.order[self.cursor :]),
                         batch_size=self.config["batch_size"],
                         num_workers=0,
+                        pin_memory=self.config.get("pin_memory", False),
                         generator=torch.Generator().manual_seed(0),
                     )
                     self.model.train()
                     window_weight, micro = 0.0, 0
                     for x, views, labels in loader:
-                        x, views, labels = x.to(self.device), views.to(self.device), labels.to(self.device)
-                        with torch.autocast(self.device.type, dtype=torch.float16, enabled=self.device.type == "cuda"):
+                        x, views, labels = (
+                            t.to(self.device, non_blocking=self.config.get("non_blocking", False))
+                            for t in (x, views, labels)
+                        )
+                        with torch.autocast(self.device.type, dtype=self.amp_dtype, enabled=self.device.type == "cuda"):
                             logits = self.model(x, views)
                             loss = F.cross_entropy(logits, labels, weight=weights, reduction="sum")
+                        if not torch.isfinite(loss):
+                            raise FloatingPointError("Nonfinite loss; aborting before backward")
                         self.scaler.scale(loss).backward()
                         denominator = weights[labels].sum().item()
                         window_weight += denominator
                         self.loss_sum += loss.detach().item()
                         self.weight_sum += denominator
                         self.correct += (logits.argmax(1) == labels).sum().item()
+                        counts = torch.bincount(labels * 2 + logits.argmax(1), minlength=4).tolist()
+                        self.confusion = [a + b for a, b in zip(self.confusion, counts)]
                         self.seen += len(labels)
                         self.cursor += len(labels)
                         micro += 1
@@ -425,7 +461,11 @@ class Trainer:
                         for parameter in self.model.parameters():
                             if parameter.grad is not None:
                                 parameter.grad.div_(window_weight)
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            1.0,
+                            error_if_nonfinite=not getattr(self.scaler, "is_enabled", lambda: True)(),
+                        )
                         old_scale = self.scaler.get_scale()
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
@@ -433,29 +473,66 @@ class Trainer:
                         if self.scaler.get_scale() >= old_scale:
                             self.scheduler.step()
                             self.step += 1
+                            self.scaler_skips = 0
+                        else:
+                            self.scaler_skips += 1
+                            if self.scaler_skips >= self.config.get("max_scaler_skips", 3):
+                                raise FloatingPointError("Excessive AMP scaler skips; no optimizer progress")
                         window_weight, micro = 0.0, 0
-                        if self.step % self.config["checkpoint_steps"] == 0 or self.stop_requested:
+                        values = {
+                            "progress/step": self.step,
+                            "train/loss": self.loss_sum / self.weight_sum,
+                            "train/acc": self.correct / self.seen,
+                            "train/lr": self.optimizer.param_groups[0]["lr"],
+                            "train/epoch": self.epoch + self.cursor / len(self.order),
+                        }
+                        if self.config.get("telemetry", False):
+                            import psutil
+
+                            elapsed = time.monotonic() - started
+                            memory = psutil.virtual_memory()
+                            values.update(
+                                {
+                                    "sys/cpu_percent": psutil.cpu_percent(),
+                                    "sys/ram_used_gb": memory.used / 1024**3,
+                                    "sys/ram_percent": memory.percent,
+                                    "sys/disk_free_gb": shutil.disk_usage(self.artifacts.local).free / 1024**3,
+                                    "train/session_wall_seconds": time.monotonic() - fit_started,
+                                    "train/samples_per_second": (self.seen - initial_seen) / max(elapsed, 1e-9),
+                                }
+                            )
+                            if self.device.type == "cuda":
+                                values.update(
+                                    {
+                                        "sys/gpu_allocated_gb": torch.cuda.memory_allocated(self.device) / 1024**3,
+                                        "sys/gpu_reserved_gb": torch.cuda.memory_reserved(self.device) / 1024**3,
+                                        "sys/gpu_free_gb": torch.cuda.mem_get_info(self.device)[0] / 1024**3,
+                                    }
+                                )
+                        with (self.artifacts.local / "steps.jsonl").open("a", encoding="utf-8") as stream:
+                            stream.write(json.dumps(values, allow_nan=False) + "\n")
+                        self.run.log(values)
+                        if (
+                            self.step % self.config["checkpoint_steps"] == 0
+                            or self.stop_requested
+                            or time.monotonic() - last_sync >= self.config.get("checkpoint_seconds", 300)
+                        ):
                             self.commit()
-                        self.run.log(
-                            {
-                                "progress/step": self.step,
-                                "train/loss": self.loss_sum / self.weight_sum,
-                                "train/acc": self.correct / self.seen,
-                                "train/lr": self.optimizer.param_groups[0]["lr"],
-                                "train/epoch": self.epoch + self.cursor / len(self.order),
-                            }
-                        )
+                            last_sync = time.monotonic()
                         if boundary_hook:
                             boundary_hook(self)
                         if self.stop_requested:
                             self.commit()
                             return False
+                    if self.step == (self.history[-1].get("step", -1) if self.history else 0):
+                        raise FloatingPointError("Epoch finished without any optimizer updates")
                     metrics = evaluate(self.model)
                     auc = metrics["auc_roc"]
                     improved = self.best_state is None or (math.isfinite(auc) and auc > self.best_auc)
                     if improved:
                         self.best_auc = auc if math.isfinite(auc) else -math.inf
                         self.best_state, self.bad = cpu_state(self.model), 0
+                        self.best_epoch, self.best_step = self.epoch + 1, self.step
                     else:
                         self.bad += 1
                     self.history.append(
@@ -466,16 +543,22 @@ class Trainer:
                             "val_f1": metrics["f1"],
                             "val_bal": metrics["balanced_acc"],
                             "val_mcc": metrics["mcc"],
+                            "step": self.step,
+                            "train": self.train_metrics(),
+                            "val": dict(metrics),
                         }
                     )
                     self.epoch += 1
                     self.cursor, self.order = 0, None
                     self.loss_sum, self.weight_sum, self.correct, self.seen = 0.0, 0.0, 0, 0
+                    self.confusion = [0, 0, 0, 0]
+                    started, initial_seen = time.monotonic(), 0
                     self.commit(best=improved)
                     self.run.log(
                         {
                             "progress/step": self.step,
                             "val/epoch": self.epoch,
+                            **{f"train/{key}": value for key, value in self.history[-1]["train"].items()},
                             **{f"val/{key}": value for key, value in metrics.items()},
                         }
                     )
@@ -497,6 +580,20 @@ class Trainer:
             except BaseException as exc:
                 print(f"Emergency persistence failed: {exc}; last.pt was not replaced by emergency state", flush=True)
             raise
+
+    def train_metrics(self):
+        tn, fp, fn, tp = self.confusion
+        return {
+            "loss": self.loss_sum / self.weight_sum,
+            "acc": self.correct / self.seen,
+            "precision": tp / max(tp + fp, 1),
+            "recall": tp / max(tp + fn, 1),
+            "f1": 2 * tp / max(2 * tp + fp + fn, 1),
+            "tn": tn,
+            "fp": fp,
+            "fn": fn,
+            "tp": tp,
+        }
 
 
 def volume_sample(volumes, index):
@@ -666,14 +763,14 @@ class SmokeModel(torch.nn.Module):
         return self.head(torch.cat([feature, views.mean((2, 3, 4))], 1))
 
 
-def predict(model, dataset, batch_size):
+def predict(model, dataset, batch_size, *, amp_dtype="float16", pin_memory=False, non_blocking=False):
     device = next(model.parameters()).device
     model.eval()
     logits, labels = [], []
     with torch.no_grad():
-        for x, views, y in DataLoader(dataset, batch_size=batch_size, num_workers=0):
-            with torch.autocast(device.type, dtype=torch.float16, enabled=device.type == "cuda"):
-                output = model(x.to(device), views.to(device))
+        for x, views, y in DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=pin_memory):
+            with torch.autocast(device.type, dtype=getattr(torch, amp_dtype), enabled=device.type == "cuda"):
+                output = model(x.to(device, non_blocking=non_blocking), views.to(device, non_blocking=non_blocking))
             logits.append(output.float().cpu())
             labels.append(y)
     output = torch.cat(logits)
@@ -793,6 +890,7 @@ def save_xai(model, dataset, artifacts, run, *, smoke=False):
     if not smoke:
         weights, gate = fm.crossgate_attention(model, x, v)
         names, drops = fm.branch_drop_importance(model, x, v, target)
+        names = ["all_2d_inputs", *names[1:]]
         artifacts.save({"weights": weights, "gate": gate, "branch_drop": dict(zip(names, drops))}, "fusion_xai.pt")
         save_image(weights, "crossgate_attention")
         save_image(drops, "branch_drop")

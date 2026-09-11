@@ -198,7 +198,8 @@ def test_amp_skipped_step_does_not_advance_scheduler(tmp_path):
             return {}
 
     current.scaler = SkipScaler()
-    current.fit(evaluate)
+    with pytest.raises(FloatingPointError, match="scaler skips"):
+        current.fit(evaluate)
     assert current.step == current.scheduler.last_epoch == 0
 
 
@@ -352,45 +353,61 @@ def test_notebook_bilateral_finetune_preset():
     source = next("".join(c["source"]) for c in cells if "RUN_GROUP = " in "".join(c["source"]))
     namespace = {"SMOKE": False}
     exec(source.split("SMOKE_ROOT =")[0], namespace)
-    assert namespace["DATASETS"] == ["bilateral"]
-    assert namespace["RUN_TARGET"] == namespace["WARM_START_TARGET"] == "bilateral_s42"
+    assert namespace["RUN_TARGET"] == "bilateral_s42"
+    assert namespace["RUN_GROUP"] == "bilateral_s42_finetune5_80gb_v1"
     assert namespace["EPOCHS"] == 5
     assert namespace["PATIENCE"] >= namespace["EPOCHS"]
-    assert namespace["BUILD_DENOISED"]
+    assert not namespace["ALLOW_BUILD_DENOISED"]
+    assert not namespace["PUBLISH_DATA_CACHE"]
+    assert namespace["CACHE_MANIFEST"] is namespace["CPU_EXPORT_ROOT"] is None
+    assert not any(namespace[k] for k in ("ENABLE_GPU_PREFLIGHT", "ENABLE_TRAIN", "ENABLE_EVAL"))
+    assert (namespace["BS"], namespace["GRAD_ACCUM"], namespace["LR"], namespace["PATIENCE"]) == (2, 8, 5e-5, 5)
+    assert (namespace["STORE_RES"], namespace["RES3D"], namespace["RES2D"]) == (200, 200, 224)
     assert namespace["WARM_START_WEIGHTS"].endswith("raw_s42_recovered_20260910/raw_s42/best_weights.pt")
     assert not namespace["RESUME"]
     assert not namespace["RUN_XAI"]
 
 
 def test_notebook_smoke_offline_end_to_end(monkeypatch):
+    import sys
+
+    import scripts
+    from scripts import final_execution as execution
+
+    for name in list(sys.modules):
+        if name.rsplit(".", 1)[-1] + ".py" in execution.BUNDLE_FILES:
+            monkeypatch.delitem(sys.modules, name)
+    for filename in execution.BUNDLE_FILES:
+        monkeypatch.delattr(scripts, filename[:-3], raising=False)
     monkeypatch.setenv("FINAL_SMOKE", "1")
     notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
     namespace = {"__name__": "__main__"}
     for index, cell in enumerate(json.loads(notebook.read_text(encoding="utf-8"))["cells"]):
         if cell["cell_type"] == "code":
             exec(compile("".join(cell["source"]), f"<notebook-cell-{index}>", "exec"), namespace)
-    assert list(namespace["RESULTS"]) == ["bilateral_s42"]
-    local = namespace["LOCAL_ROOT"] / "bilateral_s42"
-    assert namespace["config"]["denoise_method"] == "bilateral"
-    for dataset, split in zip((namespace["tr"], namespace["va"], namespace["te"]), namespace["SPLITS"]):
+    from scripts import final_execution as fx
+
+    local = namespace["LOCAL_ROOT"]
+    assert namespace["config"]["data"]["config"]["method"] == "bilateral"
+    for dataset, split in zip(fx.datasets(local, namespace["config"]), fx.SPLITS):
         assert dataset.source.name == f"{split}_volumes_dn.npy"
         assert "_volumes_dn_views_" in str(dataset.views.filename)
         raw = np.load(namespace["DATA_ROOT"] / f"{split}_volumes.npy")
         assert not np.array_equal(raw, dataset.volumes)
-    assert (local / "last.pt").exists()
-    assert (local / "metrics.json").exists()
-    assert (local / "gradcam3d.png").exists()
-    assert list((local / "wandb").glob("offline-run-*"))
-    assert (local / "completed.pt").exists()
-    namespace["RESUME"] = True
-    train_cell = next(
-        cell
-        for cell in json.loads(notebook.read_text(encoding="utf-8"))["cells"]
-        if cell["cell_type"] == "code" and "RESULTS = {}" in "".join(cell["source"])
+    assert (local / "train/last.pt").exists()
+    assert (local / "analysis/metrics.json").exists()
+    assert (local / "xai/gradcam3d.png").exists()
+    assert list((local / "train/wandb").glob("offline-run-*"))
+    assert (local / "analysis/completed.pt").exists()
+    assert (local / "final_summary.pt").exists()
+    monkeypatch.setattr(ft.Trainer, "fit", lambda *a, **k: pytest.fail("Independent stages cannot retrain"))
+    monkeypatch.setattr(
+        fx, "make_model", lambda *a, **k: pytest.fail("Cached evaluation/report cannot allocate a model")
     )
-    monkeypatch.setattr(ft, "init_wandb", lambda *a, **k: pytest.fail("Completed run should be skipped"))
-    exec(compile("".join(train_cell["source"]), "<resume-completed>", "exec"), namespace)
-    assert list(namespace["RESULTS"]) == ["bilateral_s42"]
+    fx.release_active()
+    fx.evaluation_stage(local, enabled=True)
+    fx.report_stage(local)
+    assert fx.completion_stage(local)["status"] == "analysis_complete"
 
 
 def test_sweep_status_new_initialized_resume_and_completed_remote(tmp_path):

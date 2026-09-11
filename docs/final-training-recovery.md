@@ -1,5 +1,7 @@
 # Huấn luyện CrossGate: W&B, checkpoint và khôi phục
 
+> **Cập nhật:** notebook hiện đã được chia thành các stage CPU/GPU/evaluation/report độc lập cho profile 80 GB. Hướng dẫn và tên nhóm/cờ hiện hành nằm tại [runbook 80 GB](final-training-80gb-runbook.md). Các mục bên dưới lưu lại quy trình phục hồi và preset trước khi chuẩn hóa; không dùng tên nhóm/cờ cũ để khởi chạy phiên bản mới.
+
 ## Preset hiện hành: fine-tune Bilateral 5 epoch
 
 Notebook hiện chỉ chạy **`bilateral_s42`**, khởi tạo từ best model của giai đoạn raw mới nhất:
