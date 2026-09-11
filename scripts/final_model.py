@@ -145,10 +145,14 @@ class FinalModel(nn.Module):
             es.append(enc(views[:, i]))
         return es
 
-    def forward(self, x3d, views):
+    def fuse(self, x3d, views):
         es = self.embed(x3d, views)
         toks = torch.stack([p(e) for p, e in zip(self.projs, es)], dim=1)
         z = self.fusion(toks[:, 0], toks[:, 1:])
+        return z, toks
+
+    def forward(self, x3d, views):
+        z, _ = self.fuse(x3d, views)
         return self.head(z)
 
     def gcam3d_module(self):
@@ -249,19 +253,43 @@ def full_metrics(probs, labels, threshold=0.5):
     tn = int(((pred == 0) & (labels == 0)).sum())
     fp = int(((pred == 1) & (labels == 0)).sum())
     fn = int(((pred == 0) & (labels == 1)).sum())
+    n = max(len(labels), 1)
     prec = tp / (tp + fp) if (tp + fp) else 0.0
     sens = tp / (tp + fn) if (tp + fn) else 0.0
     spec = tn / (tn + fp) if (tn + fp) else 0.0
+    npv = tn / (tn + fn) if (tn + fn) else 0.0
     f1 = 2 * prec * sens / (prec + sens) if (prec + sens) else 0.0
-    acc = (tp + tn) / max(len(labels), 1)
+    f1_neg = 2 * npv * spec / (npv + spec) if (npv + spec) else 0.0
+    acc = (tp + tn) / n
+    expected = ((tp + fn) * (tp + fp) + (tn + fp) * (tn + fn)) / (n * n)
+    kappa = (acc - expected) / (1 - expected) if expected < 1 else 0.0
+    eps = 1e-12
+    logloss = -np.mean(
+        labels * np.log(np.clip(probs, eps, 1 - eps)) + (1 - labels) * np.log(np.clip(1 - probs, eps, 1 - eps))
+    )
     return {
-        "acc": float(acc), "balanced_acc": float((sens + spec) / 2),
-        "precision": float(prec), "recall": float(sens), "sensitivity": float(sens),
-        "specificity": float(spec), "f1": float(f1), "mcc": _mcc(tp, tn, fp, fn),
+        "acc": float(acc),
+        "balanced_acc": float((sens + spec) / 2),
+        "precision": float(prec),
+        "recall": float(sens),
+        "sensitivity": float(sens),
+        "specificity": float(spec),
+        "npv": float(npv),
+        "f1": float(f1),
+        "f1_macro": float((f1 + f1_neg) / 2),
+        "mcc": _mcc(tp, tn, fp, fn),
+        "kappa": float(kappa),
+        "youden": float(sens + spec - 1),
         "auc_roc": rs.roc_auc_score_np(labels, probs),
         "auc_pr": rs.average_precision_np(labels, probs),
         "ece": rs.expected_calibration_error(probs, labels),
-        "tp": tp, "tn": tn, "fp": fp, "fn": fn, "n": int(len(labels)),
+        "logloss": float(logloss),
+        "brier": float(np.mean((probs - labels) ** 2)),
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
+        "n": int(len(labels)),
     }
 
 

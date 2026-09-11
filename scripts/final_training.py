@@ -155,7 +155,11 @@ def publish_summary(artifacts):
             "seed": r["seed"],
             "threshold": r["threshold"],
             "temperature": r["temperature"],
-            **{f"{split}_{key}": value for split in ("val", "test") for key, value in r[split].items()},
+            **{
+                f"{split}_{key}": value
+                for split in ("train", "val", "test")
+                for key, value in (r.get(split) or {}).items()
+            },
         }
         for r in ordered
     ]
@@ -176,6 +180,15 @@ def publish_summary(artifacts):
             temporary.unlink(missing_ok=True)
         artifacts.sync(path)
     return rows
+
+
+def _generate_run_id(wandb_module):
+    generate = getattr(wandb_module.util, "generate_id", None)
+    if generate is not None:
+        return generate()
+    from wandb.sdk.lib.runid import generate_id
+
+    return generate_id()
 
 
 def init_wandb(name, config, artifacts, *, resume=False, smoke=False, warm_start=""):
@@ -201,7 +214,7 @@ def init_wandb(name, config, artifacts, *, resume=False, smoke=False, warm_start
     else:
         if identity.exists() or (artifacts.remote and (artifacts.remote / identity.name).exists()):
             raise FileExistsError("Run already exists: enable RESUME or choose a new RUN_GROUP")
-        state = {"id": wandb.util.generate_id(), "config": config, "warm_start": str(warm_start)}
+        state = {"id": _generate_run_id(wandb), "config": config, "warm_start": str(warm_start)}
     artifacts.save(state, identity.name)
     run = wandb.init(
         project="glaucoma-thesis",
@@ -221,6 +234,7 @@ def init_wandb(name, config, artifacts, *, resume=False, smoke=False, warm_start
         run.define_metric("progress/step")
         run.define_metric("train/*", step_metric="progress/step")
         run.define_metric("val/*", step_metric="progress/step")
+        run.define_metric("test/*", step_metric="progress/step")
     except BaseException:
         run.finish(exit_code=1)
         raise
@@ -280,6 +294,7 @@ class Trainer:
         self.stop_requested = False
         self.failed = False
         self.order = None
+        self.window_probs, self.window_labels = [], []
         self.warm_start = str(warm_start)
         self.optimizer.zero_grad(set_to_none=True)
         if not resume and (artifacts.local / "last.pt").exists():
@@ -382,7 +397,14 @@ class Trainer:
         finally:
             signal.signal(signal.SIGINT, previous)
 
-    def fit(self, evaluate, *, boundary_hook=None):
+    def window_metrics(self):
+        from scripts import final_model as fm
+
+        if not self.window_probs:
+            return {}
+        return fm.full_metrics(torch.cat(self.window_probs).numpy(), torch.cat(self.window_labels).numpy())
+
+    def fit(self, evaluate, *, boundary_hook=None, test_evaluate=None):
         if self.failed:
             raise RuntimeError("Failed trainer may hold partial state; construct a new Trainer with resume=True")
         try:
@@ -402,14 +424,20 @@ class Trainer:
                         batch_size=self.config["batch_size"],
                         num_workers=0,
                         generator=torch.Generator().manual_seed(0),
+                        pin_memory=self.device.type == "cuda",
                     )
                     self.model.train()
                     window_weight, micro = 0.0, 0
                     for x, views, labels in loader:
-                        x, views, labels = x.to(self.device), views.to(self.device), labels.to(self.device)
+                        x = x.to(self.device, non_blocking=True)
+                        views = views.to(self.device, non_blocking=True)
+                        labels = labels.to(self.device, non_blocking=True)
                         with torch.autocast(self.device.type, dtype=torch.float16, enabled=self.device.type == "cuda"):
                             logits = self.model(x, views)
                             loss = F.cross_entropy(logits, labels, weight=weights, reduction="sum")
+                        with torch.no_grad():
+                            self.window_probs.append(logits.detach().float().softmax(1)[:, 1].cpu())
+                            self.window_labels.append(labels.detach().cpu())
                         self.scaler.scale(loss).backward()
                         denominator = weights[labels].sum().item()
                         window_weight += denominator
@@ -436,6 +464,8 @@ class Trainer:
                         window_weight, micro = 0.0, 0
                         if self.step % self.config["checkpoint_steps"] == 0 or self.stop_requested:
                             self.commit()
+                        step_metrics = self.window_metrics()
+                        self.window_probs, self.window_labels = [], []
                         self.run.log(
                             {
                                 "progress/step": self.step,
@@ -443,6 +473,11 @@ class Trainer:
                                 "train/acc": self.correct / self.seen,
                                 "train/lr": self.optimizer.param_groups[0]["lr"],
                                 "train/epoch": self.epoch + self.cursor / len(self.order),
+                                **{
+                                    f"train/{key}": value
+                                    for key, value in step_metrics.items()
+                                    if key != "acc"
+                                },
                             }
                         )
                         if boundary_hook:
@@ -466,6 +501,7 @@ class Trainer:
                             "val_f1": metrics["f1"],
                             "val_bal": metrics["balanced_acc"],
                             "val_mcc": metrics["mcc"],
+                            "val": metrics,
                         }
                     )
                     self.epoch += 1
@@ -479,6 +515,16 @@ class Trainer:
                             **{f"val/{key}": value for key, value in metrics.items()},
                         }
                     )
+                    if test_evaluate is not None:
+                        test_metrics = test_evaluate(self.model)
+                        self.history[-1]["test"] = test_metrics
+                        self.run.log(
+                            {
+                                "progress/step": self.step,
+                                "test/epoch": self.epoch,
+                                **{f"test/{key}": value for key, value in test_metrics.items()},
+                            }
+                        )
                     print(self.history[-1], flush=True)
                     if self.stop_requested:
                         return False
@@ -661,9 +707,14 @@ class SmokeModel(torch.nn.Module):
         self.conv = torch.nn.Conv3d(1, 2, 1)
         self.head = torch.nn.Linear(4, 2)
 
-    def forward(self, x, views):
+    def fuse(self, x, views):
         feature = self.conv(x).relu().mean((2, 3, 4))
-        return self.head(torch.cat([feature, views.mean((2, 3, 4))], 1))
+        summary = views.mean((2, 3, 4))
+        return torch.cat([feature, summary], 1), torch.stack([feature, summary], 1)
+
+    def forward(self, x, views):
+        z, _ = self.fuse(x, views)
+        return self.head(z)
 
 
 def predict(model, dataset, batch_size):
@@ -671,16 +722,18 @@ def predict(model, dataset, batch_size):
     model.eval()
     logits, labels = [], []
     with torch.no_grad():
-        for x, views, y in DataLoader(dataset, batch_size=batch_size, num_workers=0):
+        for x, views, y in DataLoader(
+            dataset, batch_size=batch_size, num_workers=0, pin_memory=device.type == "cuda"
+        ):
             with torch.autocast(device.type, dtype=torch.float16, enabled=device.type == "cuda"):
-                output = model(x.to(device), views.to(device))
+                output = model(x.to(device, non_blocking=True), views.to(device, non_blocking=True))
             logits.append(output.float().cpu())
             labels.append(y)
     output = torch.cat(logits)
     return output.softmax(1)[:, 1].numpy(), torch.cat(labels).numpy(), output.numpy()
 
 
-def calibrated_report(model, val, test, batch_size, *, smoke=False):
+def calibrated_report(model, val, test, batch_size, *, smoke=False, train=None):
     from scripts import final_model as fm
 
     _, vy, vl = predict(model, val, batch_size)
@@ -691,23 +744,50 @@ def calibrated_report(model, val, test, batch_size, *, smoke=False):
     threshold = fm.tune_threshold(vp, vy)
     _, ty, tl = predict(model, test, batch_size)
     tp = torch.softmax(torch.tensor(tl) / temperature, 1)[:, 1].numpy()
-    return (
-        {
-            "temperature": temperature,
-            "threshold": threshold,
-            "val": {
-                **fm.full_metrics(vp, vy, threshold),
-                "loss": F.cross_entropy(torch.tensor(vl) / temperature, torch.tensor(vy)).item(),
-            },
-            "test": {
-                **fm.full_metrics(tp, ty, threshold),
-                "loss": F.cross_entropy(torch.tensor(tl) / temperature, torch.tensor(ty)).item(),
-            },
-            "test_ci": fm.bootstrap_ci(tp, ty, n_boot=20 if smoke else 1000, threshold=threshold),
+    n_boot = 20 if smoke else 1000
+    result = {
+        "temperature": temperature,
+        "threshold": threshold,
+        "val": {
+            **fm.full_metrics(vp, vy, threshold),
+            "loss": F.cross_entropy(torch.tensor(vl) / temperature, torch.tensor(vy)).item(),
         },
-        tp,
-        ty,
-    )
+        "test": {
+            **fm.full_metrics(tp, ty, threshold),
+            "loss": F.cross_entropy(torch.tensor(tl) / temperature, torch.tensor(ty)).item(),
+        },
+        "val_ci": fm.bootstrap_ci(vp, vy, n_boot=n_boot, threshold=threshold),
+        "test_ci": fm.bootstrap_ci(tp, ty, n_boot=n_boot, threshold=threshold),
+    }
+    if train is not None:
+        trp, tr_labels, trl = predict(model, train, batch_size)
+        result["train"] = {
+            **fm.full_metrics(trp, tr_labels, threshold),
+            "loss": F.cross_entropy(torch.tensor(trl) / temperature, torch.tensor(tr_labels)).item(),
+        }
+        result["train_ci"] = fm.bootstrap_ci(trp, tr_labels, n_boot=n_boot, threshold=threshold)
+    return result, tp, ty
+
+
+def log_report(run, result):
+    import wandb
+
+    splits = [name for name in ("train", "val", "test") if result.get(name)]
+    keys = sorted({key for name in splits for key in result[name]})
+    table = wandb.Table(columns=["split", *keys])
+    summary = {}
+    for name in splits:
+        run.log({f"{name}/calibrated_{key}": value for key, value in result[name].items()})
+        summary.update({f"{name}/{key}": value for key, value in result[name].items()})
+        table.add_data(name, *[result[name].get(key) for key in keys])
+    for name in ("train_ci", "val_ci", "test_ci"):
+        for key, bounds in (result.get(name) or {}).items():
+            if isinstance(bounds, list) and len(bounds) == 2:
+                summary[f"{name}/{key}_lo"] = bounds[0]
+                summary[f"{name}/{key}_hi"] = bounds[1]
+    run.log({"report/split_table": table})
+    run.summary.update(summary)
+    return table
 
 
 def save_report(result, probs, labels, artifacts, run):
@@ -793,7 +873,23 @@ def save_xai(model, dataset, artifacts, run, *, smoke=False):
     if not smoke:
         weights, gate = fm.crossgate_attention(model, x, v)
         names, drops = fm.branch_drop_importance(model, x, v, target)
-        artifacts.save({"weights": weights, "gate": gate, "branch_drop": dict(zip(names, drops))}, "fusion_xai.pt")
+        attention = {}
+        if weights is not None:
+            attention = {f"2D-{index}": float(value) for index, value in enumerate(np.asarray(weights).ravel())}
+        artifacts.save(
+            {"weights": weights, "gate": gate, "branch_drop": dict(zip(names, drops)), "attention": attention},
+            "fusion_xai.pt",
+        )
         save_image(weights, "crossgate_attention")
         save_image(drops, "branch_drop")
-        run.summary.update({"xai/gate": gate, **{f"xai/drop_{n}": d for n, d in zip(names, drops)}})
+        table = wandb.Table(columns=["branch", "crossgate_attention", "drop_probability"])
+        for name, drop in zip(names, drops):
+            table.add_data(name, attention.get(name), float(drop))
+        run.log({"xai/fusion_table": table})
+        run.summary.update(
+            {
+                "xai/gate": gate,
+                **{f"xai/drop_{name}": drop for name, drop in zip(names, drops)},
+                **{f"xai/attention_{name}": value for name, value in attention.items()},
+            }
+        )

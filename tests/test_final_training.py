@@ -511,3 +511,51 @@ def test_actual_sigint_during_accumulation_commits_and_resumes(tmp_path):
     assert resumed.history == baseline.history
     for key, value in baseline.model.state_dict().items():
         torch.testing.assert_close(resumed.model.state_dict()[key], value, rtol=0, atol=0)
+
+
+def test_full_metrics_cover_sweep_metric_set():
+    from scripts import final_model as fm
+
+    metrics = fm.full_metrics(np.array([0.9, 0.8, 0.2, 0.1]), np.array([1, 1, 0, 0]))
+    expected = {
+        "acc",
+        "balanced_acc",
+        "precision",
+        "recall",
+        "specificity",
+        "npv",
+        "f1",
+        "f1_macro",
+        "mcc",
+        "kappa",
+        "youden",
+        "auc_roc",
+        "auc_pr",
+        "ece",
+        "logloss",
+        "brier",
+        "tp",
+        "tn",
+        "fp",
+        "fn",
+        "n",
+    }
+    assert expected <= set(metrics)
+    assert metrics["acc"] == 1.0
+    assert metrics["auc_roc"] == 1.0
+
+
+def test_trainer_logs_full_train_and_test_metrics(tmp_path):
+    cfg = config()
+    cfg["epochs"] = 1
+    current = trainer(tmp_path, cfg=cfg)
+    test_metrics = {"auc_roc": 0.6, "f1": 0.4, "balanced_acc": 0.5, "mcc": 0.1}
+    assert current.fit(evaluate, test_evaluate=lambda model: test_metrics)
+    logged = [dict(item) for item in current.run.logs]
+    train_keys = {key for item in logged for key in item if key.startswith("train/")}
+    test_keys = {key for item in logged for key in item if key.startswith("test/")}
+    assert {"train/balanced_acc", "train/precision", "train/recall", "train/f1", "train/mcc", "train/ece"} <= train_keys
+    assert train_keys >= {"train/loss", "train/acc", "train/lr"}
+    assert {"test/auc_roc", "test/f1", "test/balanced_acc", "test/mcc", "test/epoch"} <= test_keys
+    assert current.history[-1]["val"]["auc_roc"] == 0.7
+    assert current.history[-1]["test"] == test_metrics
