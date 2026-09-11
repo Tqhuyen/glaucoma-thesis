@@ -157,6 +157,22 @@ def test_warm_start_is_weights_only_and_mismatch_rejected(tmp_path):
         trainer(tmp_path / "new", warm_start=str(path))
 
 
+def test_load_weights_missing_fresh_and_emergency_payload(tmp_path):
+    source = ft.SmokeModel()
+    path = tmp_path / "weights.pt"
+    target = ft.SmokeModel()
+    assert not ft.load_weights(target, path)
+    ft.atomic_save(ft.cpu_state(source), path)
+    with torch.no_grad():
+        next(target.parameters()).add_(1)
+    assert ft.load_weights(target, path)
+    for key, value in source.state_dict().items():
+        torch.testing.assert_close(target.state_dict()[key], value)
+    ft.atomic_save({"weights": ft.cpu_state(source), "resumable": True}, path)
+    with pytest.raises(ValueError, match="resumable=False"):
+        ft.load_weights(ft.SmokeModel(), path)
+
+
 def test_accumulation_matches_large_batch_including_short_final_batch(tmp_path):
     torch.manual_seed(4)
     model = ft.SmokeModel()
@@ -364,6 +380,7 @@ def test_notebook_bilateral_200_preset():
     assert not namespace["WARM_START_WEIGHTS"]
     assert not namespace["WARM_START_TARGET"]
     assert not namespace["RESUME"]
+    assert namespace["EXTEND_EPOCHS"] == 0
     assert namespace["RUN_XAI"]
 
 
@@ -406,7 +423,9 @@ def test_sweep_status_new_initialized_resume_and_completed_remote(tmp_path):
     assert ft.run_status(artifacts, cfg, resume=True)["status"] == "new"
     artifacts.save({"id": Run.id, "config": cfg, "warm_start": "rescued.pt"}, "run_identity.pt")
     status = ft.run_status(artifacts, cfg, resume=True)
-    assert status == {"status": "initialized", "warm_start": "rescued.pt"}
+    assert status["status"] == "initialized"
+    assert status["warm_start"] == "rescued.pt"
+    assert status["config"] == cfg
     current = ft.Trainer(ft.SmokeModel(), Data(), cfg, artifacts, Run())
     assert current.epoch == current.step == 0
     current.fit(evaluate)
@@ -415,12 +434,40 @@ def test_sweep_status_new_initialized_resume_and_completed_remote(tmp_path):
     (artifacts.local / "metrics.json").write_text(json.dumps(result))
     ft.complete_run(artifacts, cfg, Run.id)
     fresh = ft.Artifacts(tmp_path / "fresh", remote)
-    assert ft.run_status(fresh, cfg, resume=True) == {"status": "complete", "result": result, "warm_start": ""}
+    status = ft.run_status(fresh, cfg, resume=True)
+    assert status["status"] == "complete"
+    assert status["result"] == result
+    assert status["warm_start"] == ""
     (remote / "metrics.json").unlink()
     assert ft.run_status(fresh, cfg, resume=True)["status"] == "resume"
     (remote / "run_identity.pt").unlink()
     with pytest.raises(RuntimeError, match="without identity"):
         ft.run_status(fresh, cfg, resume=True)
+
+
+def test_run_status_extends_epochs_and_rejects_other_changes(tmp_path):
+    cfg = config()
+    artifacts = ft.Artifacts(tmp_path, smoke=True)
+    artifacts.save({"id": Run.id, "config": cfg, "warm_start": ""}, "run_identity.pt")
+    current = ft.Trainer(ft.SmokeModel(), Data(), cfg, artifacts, Run())
+    assert current.fit(evaluate)
+    assert current.epoch == 2
+
+    status = ft.run_status(artifacts, config(), resume=True, extend_epochs=1)
+    assert status["status"] == "resume"
+    assert status["config"]["epochs"] == 3
+    assert torch.load(artifacts.local / "run_identity.pt", weights_only=False)["config"]["epochs"] == 3
+
+    resumed = ft.Trainer(ft.SmokeModel(), Data(), status["config"], artifacts, Run(), resume=True)
+    assert resumed.fit(evaluate)
+    assert resumed.epoch == 3
+    assert [entry["epoch"] for entry in resumed.history] == [1, 2, 3]
+    assert torch.load(artifacts.local / "last.pt", weights_only=False)["config"]["epochs"] == 3
+
+    changed = config()
+    changed["grad_accum"] = 3
+    with pytest.raises(ValueError, match="mismatch"):
+        ft.run_status(artifacts, changed, resume=True, extend_epochs=1)
 
 
 def test_group_summary_preserves_remote_and_unselected_rows(tmp_path):

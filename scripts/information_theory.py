@@ -173,6 +173,102 @@ def mine_mi(
     }
 
 
+def info_nce_mi(
+    x,
+    y,
+    *,
+    steps=600,
+    batch=64,
+    hidden=64,
+    lr=1e-3,
+    seed=0,
+    device="cpu",
+    val_frac=0.2,
+    temperature=0.1,
+):
+    x, y = _as_2d(x), _as_2d(y)
+    if len(x) != len(y):
+        raise ValueError("x and y must have equal length")
+    if len(x) < 4:
+        raise ValueError("At least four samples are required")
+    x, _, _ = _standardize(x)
+    y, _, _ = _standardize(y)
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(x))
+    n_val = min(max(2, int(round(len(x) * val_frac))), len(x) - 2)
+    val_idx, train_idx = order[:n_val], order[n_val:]
+    xt = torch.as_tensor(x[train_idx], dtype=torch.float32, device=device)
+    yt = torch.as_tensor(y[train_idx], dtype=torch.float32, device=device)
+    xv = torch.as_tensor(x[val_idx], dtype=torch.float32, device=device)
+    yv = torch.as_tensor(y[val_idx], dtype=torch.float32, device=device)
+    net = MINEStats(xt.shape[1], yt.shape[1], hidden).to(device)
+    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    size = min(int(batch), len(xt))
+
+    def bound(xe, ye):
+        positive = net(xe, ye) / temperature
+        negative = net(xe, ye.roll(1, dims=0)) / temperature
+        return float((positive - torch.logsumexp(torch.stack([positive, negative]), dim=0)).mean())
+
+    for _ in range(max(1, int(steps))):
+        index = torch.as_tensor(rng.integers(0, len(xt), size), device=device)
+        xb, yb = xt[index], yt[index]
+        positive = net(xb, yb) / temperature
+        negative = net(xb, yb.roll(1, dims=0)) / temperature
+        loss = -(positive - torch.logsumexp(torch.stack([positive, negative]), dim=0)).mean()
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+    with torch.no_grad():
+        return {
+            "mi": bound(xv, yv),
+            "mi_train": bound(xt, yt),
+            "bound": "infonce",
+            "steps": int(steps),
+            "n": int(len(x)),
+            "curve": [],
+        }
+
+
+def estimate_mi(
+    x,
+    y,
+    *,
+    methods=("dv", "nwj", "infonce"),
+    seeds=(0, 1, 2, 3, 4),
+    steps=600,
+    hidden=64,
+    device="cpu",
+):
+    summary = {}
+    for method in methods:
+        values = []
+        for seed in seeds:
+            if method == "infonce":
+                result = info_nce_mi(x, y, steps=steps, hidden=hidden, seed=seed, device=device)
+            else:
+                result = mine_mi(x, y, bound=method, steps=steps, hidden=hidden, seed=seed, device=device)
+            values.append(float(result["mi"]))
+        array = np.asarray(values, dtype=np.float64)
+        summary[method] = {
+            "values": values,
+            "median": float(np.median(array)),
+            "mean": float(array.mean()),
+            "std": float(array.std(ddof=1)) if len(array) > 1 else 0.0,
+            "min": float(array.min()),
+            "max": float(array.max()),
+            "negative_rate": float((array < 0).mean()),
+            "n_seeds": int(len(array)),
+        }
+    return summary
+
+
+def label_entropy(labels):
+    counts = np.bincount(np.asarray(labels, dtype=np.int64).ravel())
+    probabilities = counts[counts > 0] / counts.sum()
+    return float(-(probabilities * np.log(probabilities)).sum())
+
+
 def ksg_mi(x, y, *, k=5, max_n=500, seed=0):
     x, y = _as_2d(x), _as_2d(y)
     if len(x) != len(y):
@@ -336,6 +432,41 @@ def conditional_mi(x, y, z, *, steps=600, seed=0, device="cpu", hidden=64):
     }
 
 
+def conditional_dependence(x, y, labels, *, k=5, seed=0):
+    x, y = _as_2d(x), _as_2d(y)
+    labels = np.asarray(labels).ravel()
+    total, weight = 0.0, 0.0
+    for cls in np.unique(labels):
+        mask = labels == cls
+        if int(mask.sum()) < k + 2:
+            continue
+        share = float(mask.mean())
+        total += share * ksg_mi(x[mask], y[mask], k=k, seed=seed)
+        weight += share
+    return float(total / weight) if weight > 0 else float("nan")
+
+
+def interaction_information(x, y, labels, *, steps=600, hidden=64, seeds=(0, 1, 2, 3, 4), device="cpu"):
+    x, y = _as_2d(x), _as_2d(y)
+    labels = np.asarray(labels).ravel()
+    dependence = float(np.median([ksg_mi(x, y, seed=seed) for seed in seeds]))
+    given = conditional_dependence(x, y, labels, seed=seeds[0])
+    left = estimate_mi(x, labels[:, None], seeds=seeds, steps=steps, hidden=hidden, device=device)["dv"]["median"]
+    right = estimate_mi(y, labels[:, None], seeds=seeds, steps=steps, hidden=hidden, device=device)["dv"]["median"]
+    joint_input = np.concatenate([x, y], axis=1)
+    joint = estimate_mi(joint_input, labels[:, None], seeds=seeds, steps=steps, hidden=hidden, device=device)["dv"]["median"]
+    return {
+        "dependence": dependence,
+        "dependence_given_y": given,
+        "interaction": float(dependence - given),
+        "synergy_proxy": float(joint - max(left, right)),
+        "redundancy_proxy": float(min(left, right) - joint),
+        "mi_left": float(left),
+        "mi_right": float(right),
+        "mi_joint": float(joint),
+    }
+
+
 def collect_embeddings(model, dataset, batch_size, *, input_res=None, device=None):
     device = device or next(model.parameters()).device
     model.eval()
@@ -445,56 +576,4 @@ def validate_estimators(*, n=800, steps=500, seed=0, device="cpu"):
     }
 
 
-def plot_information_plane(rows, path, title="Information plane"):
-    import matplotlib.pyplot as plt
 
-    xs = [row["mi_xz"] for row in rows]
-    ys = [row["mi_zy"] for row in rows]
-    fig, ax = plt.subplots(figsize=(5, 4))
-    ax.plot(xs, ys, "o-")
-    for row in rows:
-        ax.annotate(str(row["epoch"]), (row["mi_xz"], row["mi_zy"]), textcoords="offset points", xytext=(4, 3))
-    ax.set(xlabel="I(X;Z) MINE", ylabel="I(Z;Y) MINE", title=title)
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    return str(path)
-
-
-def plot_surrogate(results, path, title="Surrogate data testing"):
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    for name, result in results.items():
-        ax.hist(
-            result["null"],
-            bins=int(min(20, max(5, result["n"]))),
-            alpha=0.4,
-            label=f"{name} null p={result['p_value']:.3f}",
-        )
-        ax.axvline(result["real"], linestyle="--")
-    ax.set(xlabel="MI estimate", ylabel="surrogate count", title=title)
-    ax.legend(fontsize=7)
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    return str(path)
-
-
-def plot_probes(rows, path, title="Linear probes: train to test"):
-    import matplotlib.pyplot as plt
-
-    positions = np.arange(len(rows))
-    width = 0.38
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(positions - width / 2, [row["acc"] for row in rows], width, label="acc")
-    ax.bar(positions + width / 2, [row["auc"] for row in rows], width, label="AUC")
-    ax.set_xticks(positions)
-    ax.set_xticklabels([row["name"] for row in rows], rotation=20, ha="right")
-    ax.set_ylim(0, 1)
-    ax.legend()
-    ax.set(title=title)
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    return str(path)

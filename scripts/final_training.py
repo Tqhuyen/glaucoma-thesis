@@ -81,7 +81,15 @@ class Artifacts:
         return path
 
 
-def run_status(artifacts, config, *, resume):
+def _config_without_epochs(config):
+    return {key: value for key, value in config.items() if key != "epochs"}
+
+
+def _config_compatible(old, new):
+    return _config_without_epochs(old) == _config_without_epochs(new) and int(new["epochs"]) >= int(old["epochs"])
+
+
+def run_status(artifacts, config, *, resume, extend_epochs=0):
     def locate(name):
         local = artifacts.local / name
         if local.exists():
@@ -93,12 +101,23 @@ def run_status(artifacts, config, *, resume):
     if not identity.exists():
         if checkpoint.exists() or locate("completed.pt").exists() or locate("metrics.json").exists():
             raise RuntimeError("Run artifacts exist without identity; refusing to initialize over orphaned state")
-        return {"status": "new", "warm_start": ""}
+        return {"status": "new", "warm_start": "", "config": config}
     if not resume:
         raise FileExistsError("Run already exists: enable RESUME or choose a new RUN_GROUP")
     state = torch.load(identity, map_location="cpu", weights_only=False)
-    if state["config"] != config:
+    if _config_without_epochs(state["config"]) != _config_without_epochs(config):
         raise ValueError("Run config mismatch; use a new run directory")
+    target = int(state["config"]["epochs"]) + int(extend_epochs)
+    if state["config"] != config or int(config["epochs"]) != target:
+        extended = dict(config)
+        extended["epochs"] = target
+        state["config"] = extended
+        artifacts.save(state, "run_identity.pt")
+        config = extended
+    if extend_epochs > 0:
+        for path in (artifacts.local / "completed.pt", artifacts.remote / "completed.pt" if artifacts.remote else None):
+            if path is not None:
+                path.unlink(missing_ok=True)
     complete = locate("completed.pt")
     if complete.exists():
         marker = torch.load(complete, map_location="cpu", weights_only=False)
@@ -110,10 +129,14 @@ def run_status(artifacts, config, *, resume):
                 if local.with_name(local.name + ".sync-pending.pt").exists():
                     artifacts.sync(local)
             with locate("metrics.json").open() as stream:
-                return {"status": "complete", "result": json.load(stream), "warm_start": ""}
+                return {"status": "complete", "result": json.load(stream), "warm_start": "", "config": config}
     if not checkpoint.exists() and complete.exists():
         raise RuntimeError("Incomplete reports and no safe checkpoint; cannot recover completed run")
-    return {"status": "resume" if checkpoint.exists() else "initialized", "warm_start": state.get("warm_start", "")}
+    return {
+        "status": "resume" if checkpoint.exists() else "initialized",
+        "warm_start": state.get("warm_start", ""),
+        "config": config,
+    }
 
 
 def complete_run(artifacts, config, run_id):
@@ -209,7 +232,7 @@ def init_wandb(name, config, artifacts, *, resume=False, smoke=False, warm_start
             if source.exists():
                 atomic_save(torch.load(source, weights_only=False, map_location="cpu"), identity)
         state = torch.load(identity, weights_only=False, map_location="cpu")
-        if state["config"] != config:
+        if state["config"] != config and not _config_compatible(state["config"], config):
             raise ValueError("Run config mismatch; use a new run directory for warm-start")
     else:
         if identity.exists() or (artifacts.remote and (artifacts.remote / identity.name).exists()):
@@ -262,6 +285,29 @@ def restore_rng(state):
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
+def read_weights(path):
+    weights = torch.load(path, map_location="cpu", weights_only=True)
+    if isinstance(weights, dict) and "weights" in weights:
+        if weights.get("resumable") is not False:
+            raise ValueError("Emergency warm-start payload must explicitly have resumable=False")
+        weights = weights["weights"]
+    if (
+        not isinstance(weights, dict)
+        or not weights
+        or not all(isinstance(key, str) and isinstance(value, torch.Tensor) for key, value in weights.items())
+    ):
+        raise ValueError("Warm-start must be a tensor state_dict or validated emergency weights payload")
+    return weights
+
+
+def load_weights(model, path):
+    path = Path(path)
+    if not path.is_file():
+        return False
+    model.load_state_dict(read_weights(path), strict=True)
+    return True
+
+
 class Trainer:
     def __init__(self, model, dataset, config, artifacts, run, *, resume=False, warm_start=""):
         if resume and warm_start:
@@ -306,8 +352,9 @@ class Trainer:
                 if source.exists():
                     atomic_save(torch.load(source, map_location="cpu", weights_only=False), path)
             state = torch.load(path, map_location="cpu", weights_only=False)
-            if state.get("format") != 1 or state["config"] != self.config or state["run_id"] != run.id:
+            if state.get("format") != 1 or state["run_id"] != run.id or not _config_compatible(state["config"], self.config):
                 raise ValueError("Checkpoint format/config/run id mismatch")
+            extended = int(self.config["epochs"]) > int(state["config"]["epochs"])
             self.model.load_state_dict(state["model"])
             self.optimizer.load_state_dict(state["optimizer"])
             self.scheduler.load_state_dict(state["scheduler"])
@@ -328,20 +375,11 @@ class Trainer:
                 "warm_start",
             ):
                 setattr(self, key, state[key])
+            if extended:
+                self.bad = 0
             restore_rng(state["rng"])
         elif warm_start:
-            weights = torch.load(warm_start, map_location="cpu", weights_only=True)
-            if isinstance(weights, dict) and "weights" in weights:
-                if weights.get("resumable") is not False:
-                    raise ValueError("Emergency warm-start payload must explicitly have resumable=False")
-                weights = weights["weights"]
-            if (
-                not isinstance(weights, dict)
-                or not weights
-                or not all(isinstance(key, str) and isinstance(value, torch.Tensor) for key, value in weights.items())
-            ):
-                raise ValueError("Warm-start must be a tensor state_dict or validated emergency weights payload")
-            self.model.load_state_dict(weights, strict=True)
+            self.model.load_state_dict(read_weights(warm_start), strict=True)
 
     def commit(self, *, best=False):
         if any(parameter.grad is not None for parameter in self.model.parameters()):
@@ -791,7 +829,6 @@ def log_report(run, result):
 
 
 def save_report(result, probs, labels, artifacts, run):
-    import matplotlib.pyplot as plt
     import wandb
 
     path = artifacts.local / "metrics.json"
@@ -799,41 +836,18 @@ def save_report(result, probs, labels, artifacts, run):
         json.dump(result, stream, indent=2)
     artifacts.sync(path)
     artifacts.save({"probs": probs, "labels": labels}, "test_predictions.pt")
-    hist = result["hist"]
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3))
-    for ax, key in zip(axes, ("loss", "val_auc", "val_f1")):
-        ax.plot([h["epoch"] for h in hist], [h[key] for h in hist])
-        ax.set(title=key, xlabel="epoch")
-    path = artifacts.local / "curves.png"
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    artifacts.sync(path)
-    run.log({"figures/curves": wandb.Image(str(path))})
-    order = np.argsort(-probs)
-    tp, fp = np.cumsum(labels[order]), np.cumsum(1 - labels[order])
-    fig, axes = plt.subplots(1, 4, figsize=(16, 3))
-    axes[0].plot(np.r_[0, fp / max(fp[-1], 1)], np.r_[0, tp / max(tp[-1], 1)])
-    axes[0].set(title="ROC", xlabel="FPR", ylabel="TPR")
-    axes[1].plot(tp / max(tp[-1], 1), tp / np.maximum(tp + fp, 1))
-    axes[1].set(title="Precision-Recall", xlabel="Recall", ylabel="Precision")
-    bins = np.minimum((probs * 10).astype(int), 9)
-    occupied = [bins == b for b in range(10) if (bins == b).any()]
-    axes[2].plot([probs[m].mean() for m in occupied], [labels[m].mean() for m in occupied], "o-")
-    axes[2].plot([0, 1], [0, 1], "--")
-    axes[2].set(title="Calibration", xlabel="Probability", ylabel="Positive fraction")
-    predictions = probs >= result["threshold"]
-    matrix = np.array([[((labels == i) & (predictions == j)).sum() for j in range(2)] for i in range(2)])
-    axes[3].imshow(matrix, cmap="Blues")
-    for (i, j), value in np.ndenumerate(matrix):
-        axes[3].text(j, i, str(value), ha="center")
-    axes[3].set(title="Confusion", xlabel="Predicted", ylabel="True")
-    path = artifacts.local / "test_report.png"
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    artifacts.sync(path)
-    run.log({"figures/test_report": wandb.Image(str(path))})
+    history = result["hist"]
+    keys = sorted({key for entry in history for key in entry if key not in ("epoch", "val", "test")})
+    table = wandb.Table(columns=["epoch", *keys])
+    for entry in history:
+        table.add_data(entry.get("epoch"), *[entry.get(key) for key in keys])
+    run.log({"report/history_table": table})
+    for split in ("train", "val", "test"):
+        metrics = result.get(split) or {}
+        summary = {f"{split}/{key}": value for key, value in metrics.items()}
+        if summary:
+            run.summary.update(summary)
+    return path
 
 
 def save_xai(model, dataset, artifacts, run, *, smoke=False):
@@ -880,8 +894,6 @@ def save_xai(model, dataset, artifacts, run, *, smoke=False):
             {"weights": weights, "gate": gate, "branch_drop": dict(zip(names, drops)), "attention": attention},
             "fusion_xai.pt",
         )
-        save_image(weights, "crossgate_attention")
-        save_image(drops, "branch_drop")
         table = wandb.Table(columns=["branch", "crossgate_attention", "drop_probability"])
         for name, drop in zip(names, drops):
             table.add_data(name, attention.get(name), float(drop))

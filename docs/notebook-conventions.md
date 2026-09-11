@@ -11,6 +11,11 @@ mô hình trong repo. Nguồn tham chiếu chính là notebook sweep 2D–3D fus
 Thứ tự dưới đây lấy từ sweep notebook; notebook train đơn lẻ có thể bỏ các phần sweep/X-AI nhưng
 **không được bỏ** phần 2–4, 9, 11–12.
 
+**Nguyên tắc chia cell:** mỗi cell làm **một việc** hoặc một nhóm việc cùng loại (setup, config, data,
+dataset/loader, model, train, metrics, X-AI, phân tích, reporting) — không gộp nhiều thành phần nặng vào một cell.
+Giữ cell ngắn, ít side effect chéo, biến trung gian ở global để có thể **chạy lại đúng cell đó** khi debug/sửa lỗi
+thay vì chạy lại cả notebook. Cell quá dài (> ~80 dòng) nên tách theo thành phần và đặt markdown heading rõ ràng.
+
 | # | Cell | Nội dung | Ví dụ trong sweep |
 |---|---|---|---|
 | 1 | Title/overview (markdown) | Bài toán, dataset, pipeline, runtime budget, cách chạy, cách bật smoke | Cell 1: dataset + "Honest runtime expectation" |
@@ -25,7 +30,7 @@ Thứ tự dưới đây lấy từ sweep notebook; notebook train đơn lẻ c�
 | 10 | Sweep driver (nếu sweep) | Tier/spec, mỗi run xong ghi `results.json` (local + Drive) ngay, figure per-run xuất ngay | Cell 28–31 |
 | 11 | X-AI (nếu có) | Grad-CAM 3D/2D, occlusion, integrated gradients, branch importance, LIME; lưu PNG + markdown | Cell 32–38 |
 | 11b | Phân tích tùy chọn (nếu có) | Info-theory/embedding analysis chạy **trong cùng notebook** qua cờ `RUN_INFO`; logic ở `scripts/information_theory.py` | `3d_glaucoma_train_3branch_crossgate.ipynb` |
-| 12 | Chạy + reporting | Chạy sweep/train, render bảng CSV/PNG, markdown report, **Drive sync + `run.finish()`** | Cell 39–49 |
+| 12 | Chạy + reporting | Chạy sweep/train, render bảng CSV, W&B table/scalar, markdown report, **Drive sync + `run.finish()`** | Cell 39–49 |
 | 13 | Notes/limitations (markdown) | Cảnh báo single-seed, metric thiếu ghi `—`, confound, cách resume | Cell 50 |
 
 ## 2. Chi tiết từng mục
@@ -72,6 +77,10 @@ Mỗi 3D encoder `(B,1,D,H,W) -> out_dim` pooled; mỗi 2D encoder `(B,1,H,W) ->
 Các phép fusion tham chiếu (concat/add/mul/attn/crossgate/mamba/film); mặc định CrossGate (3D làm query, 2D làm
 key/value, gate học được). `forward` trả logits thô để ghép `CrossEntropyLoss`; expose `fuse()`/`embed()` khi cần
 X-AI/phân tích embedding.
+- **Khởi tạo model theo thứ tự ưu tiên**: (1) resume `last.pt` qua Trainer; (2) load weights từ path
+  (`WARM_START_WEIGHTS` hoặc `best_weights.pt` của run) bằng `ft.load_weights(model, path)` — khi đó **bỏ tải
+  pretrained backbone**; (3) chỉ khi path chưa tồn tại mới khởi tạo model mới (pretrained). Tách việc build model
+  thành cell riêng để dễ chạy lại khi debug.
 
 ### 2.8 Metrics (đủ bộ theo sweep)
 Bộ metric đầy đủ theo `metrics_full` của sweep (mở rộng trong `fm.full_metrics`):
@@ -86,12 +95,17 @@ Nhịp log (train từng bước, val/test từng epoch):
 - **Chốt cuối** (best state): `calibrated_report` fit temperature + threshold (Youden-J) trên val rồi tính
   calibrated `train`/`val`/`test` + bootstrap CI; `ft.log_report` ghi bảng so sánh `report/split_table` và summary
   `train|val|test/<metric>` (+ `_lo`/`_hi` cho CI).
+- **Chỉ số không vẽ đồ thị**: log bằng W&B Table/số (`report/split_table`, `report/history_table`, `report/*_table`)
+  và summary; không tạo PNG cho metrics (ROC/PR/calibration/confusion/history). Đồ thị chỉ dành cho X-AI/ảnh.
 - AUC/PR-AUC trên cửa sổ nhỏ có thể NaN khi cửa sổ chỉ có một lớp — đọc xu hướng theo epoch, đừng chọn theo bước.
 
 ### 2.9 Probe + train loop
 `probe()` chạy 1 forward/backward (params, peak VRAM, fallback batch 1 khi OOM). Train: AdamW + cosine + warmup +
 AMP + grad-accum + grad-clip + early stop; lr theo effective batch; best theo val AUC; checkpoint atomic; `history`
 lưu đầy đủ `val`/`test` metrics mỗi epoch để vẽ và đối chiếu sau này.
+- **Train thêm epoch**: đặt `RESUME=True` + `EXTEND_EPOCHS=N` rồi chạy lại cell train; hệ thống cộng N epoch vào
+  target đã lưu (config chỉ được phép khác `epochs`), cập nhật identity/`last.pt`, mở lại `completed.pt` (nếu có),
+  reset patience và LR chạy theo cosine của tổng epoch mới. Không cần tạo `RUN_GROUP` mới.
 
 ### 2.10 Sweep driver (nếu sweep)
 Mỗi spec override `res3d`/`res2d`/`batch_size`/`epochs`; mỗi run xong ghi ngay `results.json` (local + Drive) và
@@ -104,22 +118,36 @@ Trên best model + mẫu test cân bằng lớp:
 - **Fusion attention** + **branch drop** (leave-one-branch-out) trả lời nhánh nào quyết định.
 - **LIME** mức view (tùy chọn).
 
-Lưu local + Drive: PNG, `XAI_REPORT.md`, `fusion_xai.pt` (weights/gate/branch_drop/attention), sync **ngay khi sinh ra**.
-W&B: ảnh `wandb.Image`, bảng **`xai/fusion_table`** (`branch`, `crossgate_attention`, `drop_probability`) và summary
-`xai/gate`, `xai/drop_*`, `xai/attention_*` để so sánh X-AI giữa các model.
+Lưu local + Drive: PNG heatmap (Grad-CAM 3D/2D, occlusion, IG), `XAI_REPORT.md`, `fusion_xai.pt`
+(weights/gate/branch_drop/attention), sync **ngay khi sinh ra**.
+W&B: ảnh heatmap `wandb.Image`, bảng **`xai/fusion_table`** (`branch`, `crossgate_attention`, `drop_probability`)
+và summary `xai/gate`, `xai/drop_*`, `xai/attention_*`; các giá trị này log bằng bảng/số, **không vẽ chart**.
 
 ### 2.11b Phân tích tùy chọn (information theory / embedding)
 - Cùng notebook với train, gate bằng cờ config (`RUN_INFO=True/False`); **không** tạo notebook fork chỉ để thêm phân tích.
 - `evaluate()` chỉ capture embedding mỗi epoch khi cờ bật; khi tắt thì dùng predict thường (không thêm chi phí).
-- Đầu ra: linear probe (logistic + MLP), MINE (DV)/NWJ, MIC, surrogate data testing (permutation + p-value),
-  joint/conditional MI giữa các nhánh, information plane I(X;Z)–I(Z;Y).
-- Lưu `info_theory.json`/`info_theory.pt` + figure; log bảng/giá trị lên W&B (`probes/*`, `mi/*`, `surrogate/*`);
-  artifact sync Drive ngay khi sinh ra.
-- Giới hạn subset/steps/PCA-dim để không làm chậm run; cell này cũng chịu trách nhiệm `run.finish()` khi cờ bật.
+- Chia thành các cell nhỏ: (a) load model + collect embedding; (b) probe + ablation nhánh; (c) đa-seed MI;
+  (d) surrogate; (e) redundancy/synergy; (f) information plane; (g) lưu + `run.finish()`.
+- **Probe ablation**: logistic + MLP trên từng nhánh, cặp 3D+view, concat tất cả và `z_fused` (ablation mức
+  representation; ablation mức retrain dùng `N_2D=1`/`RUN_GROUP` khác).
+- **Đa-seed estimator**: DV, NWJ, InfoNCE × `IT_ESTIMATOR_SEEDS` (≥5 cho luận văn), báo cáo
+  median/mean/std/min/max và **negative-rate**; **không clamp giá trị âm** (âm = estimator chưa hội tụ/bias).
+  Kèm MIC và normalized MI (`MI/H(Y)`); log entropy `entropy/labels`.
+- **Surrogate**: permutation cho MIC (`IT_SURROGATES`, ≥1000 cho p-value resolution) và cho MINE
+  (`IT_MINE_SURROGATES`, nhỏ hơn vì đắt); báo p-value, z-score và ngưỡng Bonferroni.
+- **Redundancy/synergy**: interaction information `II = I(Z1;Z2) − I(Z1;Z2|Y)` (dương ~ redundancy, âm ~ synergy)
+  + conditional MI và joint MI; là proxy, không thay thế PID đầy đủ.
+- **Information plane**: I(X;Z) vs I(Z;Y) theo epoch từ embedding đã capture; đọc xu hướng, không kết luận
+  bottleneck khi giá trị âm.
+- Lưu `info_theory.json`/`info_theory.pt`; log **bảng** (`report/probe_table`, `report/mi_estimators_table`,
+  `report/surrogate_table`, `report/interaction_table`, `report/plane_table`) + scalar summary
+  (`entropy/*`, `mi/*`, `surrogate/*`, `interaction/*`); **không vẽ figure**.
+- Giới hạn subset/steps/PCA-dim; dùng validation để chọn estimator/probe, giữ test cho đánh giá cuối; cell cuối
+  chịu trách nhiệm `run.finish()` khi cờ bật.
 
 ### 2.12 Reporting
-Learning curves, ROC, PR, calibration, confusion; `metrics.json` + CSV + bảng split; log W&B; sync Drive;
-`run.finish(exit_code=...)`; nếu có X-AI thì bảng/giá trị ở mục 2.11.
+`metrics.json` + history + CSV/bảng split; log W&B bằng table/scalar (`report/split_table`, `report/history_table`),
+**không vẽ đồ thị metrics**; sync Drive; `run.finish(exit_code=...)`; X-AI ở mục 2.11.
 
 ### 2.13 Notes/limitations (markdown)
 Single-seed, metric thiếu ghi `—`, ảnh hưởng resolution/denoise, cách resume, ngoại lệ preset (ví dụ preset
@@ -172,6 +200,9 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 ### 3.7 Resume-safe & smoke
 - Mỗi run ghi kết quả ngay vào `results.json` (local + Drive) và checkpoint atomic; interrupt giữ nguyên
   các run đã hoàn thành, chạy lại thì resume chứ không chạy lại từ đầu.
+- **Gia hạn train**: `RESUME=True` + `EXTEND_EPOCHS=N` (mặc định 0) để train thêm N epoch trên cùng run; `epochs`
+  là trường duy nhất được phép khác so với config đã lưu; `completed.pt` được mở lại, patience reset, LR đi theo
+  cosine của tổng epoch mới. Chạy lại cell train là đủ, không tạo run mới.
 - Trước khi đốt GPU: `*_SMOKE=1` chạy CPU với dữ liệu synthetic nhỏ, **không download**; toàn bộ cell
   phải pass. Với pipeline đầy đủ, `make sanity` phải overfit 10 mẫu trước khi nghi ngờ dữ liệu.
 
@@ -208,14 +239,25 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Giữ đúng thứ tự cell mục 1; logic tái sử dụng nằm ở `scripts/*.py`, notebook chỉ cấu hình và gọi.
 - Notebook mới phải pass `*_SMOKE=1` (CPU, synthetic) và checklist mục 4 trước khi giao.
 
+### 3.12 Chia cell nhỏ theo thành phần
+- Mỗi cell một việc/nhóm việc giống nhau (setup, config, data, loader, model, train, metrics, X-AI, phân tích,
+  reporting); không nhồi nhiều thành phần vào cùng cell.
+- Cell nên chạy lại độc lập khi debug; biến trung gian giữ ở global; đặt markdown heading cho từng phần.
+- Model: load từ path trước (`ft.load_weights`, `WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi path
+  chưa có (và khi đó mới tải pretrained backbone).
+
 ## 4. Checklist trước khi giao notebook
 
 - [ ] Đúng thứ tự cell mục 1; config một nguồn duy nhất, có env override.
+- [ ] Cell tách theo thành phần (mỗi cell 1 việc/nhóm việc), chạy lại được từng cell khi debug/sửa lỗi.
+- [ ] Model load từ path trước (`WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi chưa có weights.
 - [ ] `*_SMOKE=1` chạy hết cell trên CPU, synthetic, không download — pass.
 - [ ] W&B init + log live đúng prefix + figures as `wandb.Image` + `summary.update` + `finish`.
 - [ ] **Train log đủ bộ metric mỗi optimizer step; val + test log đủ bộ metric mỗi epoch.**
 - [ ] **Chốt cuối có calibrated `train`/`val`/`test` + bootstrap CI và bảng `report/split_table` trên W&B.**
 - [ ] **Sau train chạy X-AI trên best model, log `xai/fusion_table` + giá trị `xai/*` lên W&B (hoặc ghi rõ ngoại lệ).**
+- [ ] Chỉ số log bằng W&B table/scalar; **không vẽ đồ thị metrics** (đồ thị chỉ dùng cho X-AI/ảnh).
+- [ ] Info-theory (nếu có): đa-seed DV/NWJ/InfoNCE có negative-rate (không clamp); surrogate ≥1000 cho MIC; interaction information cho redundancy/synergy; tất cả log bằng table/scalar.
 - [ ] **Optional stages (X-AI/info-theory) là cờ trong cùng notebook, không tách/fork notebook; logic ở `scripts/`.**
 - [ ] Mọi artifact (figure/model/CSV/report/X-AI) sync Drive ngay khi sinh ra.
 - [ ] HF download có `HF_TOKEN` + `allow_patterns` chỉ tải phần dùng; real run thiếu token fail sớm.
@@ -226,6 +268,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - [ ] Đo `sec/epoch` + peak VRAM; phân tích nặng (MI/X-AI) có giới hạn subset/steps.
 - [ ] Best checkpoint theo val AUC; threshold/calibration fit trên val, không dùng test.
 - [ ] Resume-safe: `results.json` append + checkpoint atomic.
+- [ ] Cell train hỗ trợ gia hạn (`RESUME=True` + `EXTEND_EPOCHS=N`) mà không cần `RUN_GROUP` mới.
 - [ ] `ruff check` sạch cho file Python mới; unit-test core mới pass.
 - [ ] Notes/limitations được ghi rõ.
 

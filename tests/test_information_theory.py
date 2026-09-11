@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from scripts import final_training as ft
@@ -62,3 +63,31 @@ def test_collect_embeddings_contract_for_smoke_model():
     assert result["x"].shape == (8, 64)
     assert result["y"].shape == (8,)
     assert np.all((result["probs"] >= 0) & (result["probs"] <= 1))
+
+
+def test_info_nce_and_multi_seed_estimate_ordering():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(300, 1))
+    y = x + 0.3 * rng.normal(size=(300, 1))
+    independent = it.info_nce_mi(x, rng.normal(size=(300, 1)), steps=200, seed=0)["mi"]
+    dependent = it.info_nce_mi(x, y, steps=200, seed=0)["mi"]
+    assert dependent > independent
+    stats = it.estimate_mi(x, y, methods=("dv", "infonce"), seeds=(0, 1), steps=100)
+    assert set(stats) == {"dv", "infonce"}
+    for method in stats.values():
+        assert method["n_seeds"] == 2
+        assert 0.0 <= method["negative_rate"] <= 1.0
+        assert method["min"] <= method["median"] <= method["max"]
+    assert it.label_entropy(np.array([0, 0, 1, 1])) == pytest.approx(0.6931, abs=1e-3)
+
+
+def test_interaction_information_flags_redundancy():
+    rng = np.random.default_rng(1)
+    labels = (rng.normal(size=400) > 0).astype(np.int64)
+    z1 = labels[:, None] + 0.4 * rng.normal(size=(400, 1))
+    z2 = labels[:, None] + 0.4 * rng.normal(size=(400, 1))
+    redundant = it.interaction_information(z1, z2, labels, steps=100, seeds=(0, 1))
+    independent = it.interaction_information(
+        rng.normal(size=(400, 2)), rng.normal(size=(400, 2)), labels, steps=100, seeds=(0, 1)
+    )
+    assert redundant["interaction"] > independent["interaction"]
