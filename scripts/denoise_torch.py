@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import math
 import os
 import tempfile
 import time
@@ -10,11 +11,13 @@ import numpy as np
 try:
     import torch
     import torch.nn as nn
+    import torch.nn.functional as F
 
     TORCH_OK = True
 except Exception:
     torch = None
     nn = None
+    F = None
     TORCH_OK = False
 
 WEIGHTS_DIR = os.environ.get("GF_DENOISE_WEIGHTS") or os.path.join(tempfile.gettempdir(), "gf_denoise_weights")
@@ -213,6 +216,59 @@ def _denoise_volume(model, device, name, vol):
             if device.type == "cuda":
                 torch.cuda.empty_cache()
     return out
+
+
+def bilateral_volume(vol, sigma_color=0.10, sigma_spatial=4.0, device="auto", cache_path=None, batch=8):
+    side = cache_path.replace(".npy", ".json") if cache_path else None
+    meta = json.load(open(side)) if (side and os.path.exists(side)) else {}
+    if cache_path and os.path.exists(cache_path):
+        out = np.load(cache_path)
+        if out.shape == vol.shape:
+            return out, float(meta.get("time_s", 0.0))
+    if not TORCH_OK:
+        raise RuntimeError("torch not importable")
+    if device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    radius = int(round(3.0 * float(sigma_spatial)))
+    offsets = [(dy, dx) for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)]
+    spatial = [math.exp(-(dy * dy + dx * dx) / (2.0 * float(sigma_spatial) ** 2)) for dy, dx in offsets]
+    color_den = 2.0 * float(sigma_color) ** 2
+    n = vol.shape[0]
+    out = np.empty_like(vol)
+    t0 = time.time()
+    index = 0
+    while index < n:
+        size = min(int(batch), n - index)
+        x = torch.from_numpy(vol[index : index + size].astype(np.float32) / 255.0)[:, None].to(device)
+        padded = F.pad(x, (radius, radius, radius, radius), mode="replicate")
+        height, width = x.shape[2], x.shape[3]
+        numerator = torch.zeros_like(x)
+        denominator = torch.zeros_like(x)
+        for (dy, dx), weight in zip(offsets, spatial):
+            shifted = padded[:, :, radius + dy : radius + dy + height, radius + dx : radius + dx + width]
+            kernel = weight * torch.exp(-((shifted - x) ** 2) / color_den)
+            numerator = numerator + kernel * shifted
+            denominator = denominator + kernel
+        y = (numerator / denominator).clamp_(0, 1)
+        out[index : index + size] = np.clip(y[:, 0].cpu().numpy() * 255.0, 0, 255).astype(np.uint8)
+        index += size
+    dt = time.time() - t0
+    if cache_path:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        np.save(cache_path, out)
+        if side:
+            with open(side, "w") as fh:
+                json.dump(
+                    {
+                        "time_s": round(dt, 2),
+                        "device": str(device),
+                        "method": "bilateral_torch",
+                        "sigma_color": float(sigma_color),
+                        "sigma_spatial": float(sigma_spatial),
+                    },
+                    fh,
+                )
+    return out, dt
 
 
 def denoise_volume(name, vol, device="auto", cache_path=None):
