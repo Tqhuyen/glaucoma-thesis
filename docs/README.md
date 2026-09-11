@@ -13,5 +13,6 @@
 | [`multiview-model.md`](multiview-model.md) | Kiến trúc mô hình đa luồng 2D-projection + 3D (Group A) |
 | [`train-platform-method.md`](train-platform-method.md) | So sánh nền tảng huấn luyện (local/Colab/vast.ai) & phương pháp tối ưu chi phí-thời gian |
 | [`swinunetr-encoder-notes.md`](swinunetr-encoder-notes.md) | Ghi chú encoder Swin-UNETR |
+| [`notebook-conventions.md`](notebook-conventions.md) | Cấu trúc cell & quy tắc bắt buộc khi tạo notebook train/sweep (chuẩn hoá từ sweep 2D–3D fusion) |
 
 Hình minh hoạ nằm ở thư mục gốc `figures/` (khi tài liệu trong `docs/` dùng đường dẫn `../figures/...`).

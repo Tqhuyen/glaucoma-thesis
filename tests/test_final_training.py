@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import signal
 from pathlib import Path
 
@@ -156,6 +157,27 @@ def test_warm_start_is_weights_only_and_mismatch_rejected(tmp_path):
         trainer(tmp_path / "new", warm_start=str(path))
 
 
+def test_find_batch_size_returns_start_without_cuda():
+    result = ft.find_batch_size(lambda: ft.SmokeModel(), Data(), device=torch.device("cpu"), start=3)
+    assert result == {"batch_size": 3, "peak_gb": 0.0, "status": "cpu", "trials": []}
+
+
+def test_load_weights_missing_fresh_and_emergency_payload(tmp_path):
+    source = ft.SmokeModel()
+    path = tmp_path / "weights.pt"
+    target = ft.SmokeModel()
+    assert not ft.load_weights(target, path)
+    ft.atomic_save(ft.cpu_state(source), path)
+    with torch.no_grad():
+        next(target.parameters()).add_(1)
+    assert ft.load_weights(target, path)
+    for key, value in source.state_dict().items():
+        torch.testing.assert_close(target.state_dict()[key], value)
+    ft.atomic_save({"weights": ft.cpu_state(source), "resumable": True}, path)
+    with pytest.raises(ValueError, match="resumable=False"):
+        ft.load_weights(ft.SmokeModel(), path)
+
+
 def test_accumulation_matches_large_batch_including_short_final_batch(tmp_path):
     torch.manual_seed(4)
     model = ft.SmokeModel()
@@ -272,7 +294,7 @@ def test_calibration_threshold_and_bootstrap_use_same_scale(monkeypatch):
 
     logits = np.array([[4.0, 0.0], [0.0, 4.0]], dtype=np.float32)
     labels = np.array([0, 1])
-    monkeypatch.setattr(ft, "predict", lambda *args: (None, labels, logits))
+    monkeypatch.setattr(ft, "predict", lambda *args, **kwargs: (None, labels, logits))
     monkeypatch.setattr(fm, "temperature_scale", lambda *args, **kwargs: 2.0)
     expected = torch.softmax(torch.tensor(logits) / 2.0, 1)[:, 1].numpy()
 
@@ -347,11 +369,11 @@ def test_partial_denoise_and_per_source_views(tmp_path, channel):
     torch.testing.assert_close(ds[0][0], ds[0][0], rtol=0, atol=0)
 
 
-def test_notebook_bilateral_finetune_preset():
+def test_notebook_bilateral_200_preset():
     notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
     cells = json.loads(notebook.read_text(encoding="utf-8"))["cells"]
     source = next("".join(c["source"]) for c in cells if "RUN_GROUP = " in "".join(c["source"]))
-    namespace = {"SMOKE": False}
+    namespace = {"SMOKE": False, "os": os}
     exec(source.split("SMOKE_ROOT =")[0], namespace)
     assert namespace["RUN_TARGET"] == "bilateral_s42"
     assert namespace["RUN_GROUP"] == "bilateral_s42_finetune5_80gb_v1"
@@ -365,7 +387,10 @@ def test_notebook_bilateral_finetune_preset():
     assert (namespace["STORE_RES"], namespace["RES3D"], namespace["RES2D"]) == (200, 200, 224)
     assert namespace["WARM_START_WEIGHTS"].endswith("raw_s42_recovered_20260910/raw_s42/best_weights.pt")
     assert not namespace["RESUME"]
+    assert namespace["EXTEND_EPOCHS"] == 0
     assert not namespace["RUN_XAI"]
+    assert not namespace["RUN_INFO"]
+    assert namespace["NUM_WORKERS"] == 0
 
 
 def test_notebook_smoke_offline_end_to_end(monkeypatch):
@@ -400,6 +425,7 @@ def test_notebook_smoke_offline_end_to_end(monkeypatch):
     assert list((local / "train/wandb").glob("offline-run-*"))
     assert (local / "analysis/completed.pt").exists()
     assert (local / "final_summary.pt").exists()
+    assert (local / "information/report/info_theory.json").exists()
     monkeypatch.setattr(ft.Trainer, "fit", lambda *a, **k: pytest.fail("Independent stages cannot retrain"))
     monkeypatch.setattr(
         fx, "make_model", lambda *a, **k: pytest.fail("Cached evaluation/report cannot allocate a model")
@@ -418,7 +444,9 @@ def test_sweep_status_new_initialized_resume_and_completed_remote(tmp_path):
     assert ft.run_status(artifacts, cfg, resume=True)["status"] == "new"
     artifacts.save({"id": Run.id, "config": cfg, "warm_start": "rescued.pt"}, "run_identity.pt")
     status = ft.run_status(artifacts, cfg, resume=True)
-    assert status == {"status": "initialized", "warm_start": "rescued.pt"}
+    assert status["status"] == "initialized"
+    assert status["warm_start"] == "rescued.pt"
+    assert status["config"] == cfg
     current = ft.Trainer(ft.SmokeModel(), Data(), cfg, artifacts, Run())
     assert current.epoch == current.step == 0
     current.fit(evaluate)
@@ -427,12 +455,40 @@ def test_sweep_status_new_initialized_resume_and_completed_remote(tmp_path):
     (artifacts.local / "metrics.json").write_text(json.dumps(result))
     ft.complete_run(artifacts, cfg, Run.id)
     fresh = ft.Artifacts(tmp_path / "fresh", remote)
-    assert ft.run_status(fresh, cfg, resume=True) == {"status": "complete", "result": result, "warm_start": ""}
+    status = ft.run_status(fresh, cfg, resume=True)
+    assert status["status"] == "complete"
+    assert status["result"] == result
+    assert status["warm_start"] == ""
     (remote / "metrics.json").unlink()
     assert ft.run_status(fresh, cfg, resume=True)["status"] == "resume"
     (remote / "run_identity.pt").unlink()
     with pytest.raises(RuntimeError, match="without identity"):
         ft.run_status(fresh, cfg, resume=True)
+
+
+def test_run_status_extends_epochs_and_rejects_other_changes(tmp_path):
+    cfg = config()
+    artifacts = ft.Artifacts(tmp_path, smoke=True)
+    artifacts.save({"id": Run.id, "config": cfg, "warm_start": ""}, "run_identity.pt")
+    current = ft.Trainer(ft.SmokeModel(), Data(), cfg, artifacts, Run())
+    assert current.fit(evaluate)
+    assert current.epoch == 2
+
+    status = ft.run_status(artifacts, config(), resume=True, extend_epochs=1)
+    assert status["status"] == "resume"
+    assert status["config"]["epochs"] == 3
+    assert torch.load(artifacts.local / "run_identity.pt", weights_only=False)["config"]["epochs"] == 3
+
+    resumed = ft.Trainer(ft.SmokeModel(), Data(), status["config"], artifacts, Run(), resume=True)
+    assert resumed.fit(evaluate)
+    assert resumed.epoch == 3
+    assert [entry["epoch"] for entry in resumed.history] == [1, 2, 3]
+    assert torch.load(artifacts.local / "last.pt", weights_only=False)["config"]["epochs"] == 3
+
+    changed = config()
+    changed["grad_accum"] = 3
+    with pytest.raises(ValueError, match="mismatch"):
+        ft.run_status(artifacts, changed, resume=True, extend_epochs=1)
 
 
 def test_group_summary_preserves_remote_and_unselected_rows(tmp_path):
@@ -528,3 +584,174 @@ def test_actual_sigint_during_accumulation_commits_and_resumes(tmp_path):
     assert resumed.history == baseline.history
     for key, value in baseline.model.state_dict().items():
         torch.testing.assert_close(resumed.model.state_dict()[key], value, rtol=0, atol=0)
+
+
+def test_full_metrics_cover_sweep_metric_set():
+    from scripts import final_model as fm
+
+    metrics = fm.full_metrics(np.array([0.9, 0.8, 0.2, 0.1]), np.array([1, 1, 0, 0]))
+    expected = {
+        "acc",
+        "balanced_acc",
+        "precision",
+        "recall",
+        "specificity",
+        "npv",
+        "f1",
+        "f1_macro",
+        "mcc",
+        "kappa",
+        "youden",
+        "auc_roc",
+        "auc_pr",
+        "ece",
+        "logloss",
+        "brier",
+        "tp",
+        "tn",
+        "fp",
+        "fn",
+        "n",
+    }
+    assert expected <= set(metrics)
+    assert metrics["acc"] == 1.0
+    assert metrics["auc_roc"] == 1.0
+
+
+def test_trainer_logs_full_train_and_test_metrics(tmp_path):
+    cfg = config()
+    cfg["epochs"] = 1
+    current = trainer(tmp_path, cfg=cfg)
+    test_metrics = {"auc_roc": 0.6, "f1": 0.4, "balanced_acc": 0.5, "mcc": 0.1}
+    assert current.fit(evaluate, test_evaluate=lambda model: test_metrics)
+    logged = [dict(item) for item in current.run.logs]
+    train_keys = {key for item in logged for key in item if key.startswith("train/")}
+    test_keys = {key for item in logged for key in item if key.startswith("test/")}
+    assert {"train/balanced_acc", "train/precision", "train/recall", "train/f1", "train/mcc", "train/ece"} <= train_keys
+    assert train_keys >= {"train/loss", "train/acc", "train/lr"}
+    assert {"test/auc_roc", "test/f1", "test/balanced_acc", "test/mcc", "test/epoch"} <= test_keys
+    assert current.history[-1]["val"]["auc_roc"] == 0.7
+    assert current.history[-1]["test"] == test_metrics
+    checkpoint = torch.load(tmp_path / "last.pt", weights_only=False)
+    assert checkpoint["history"][-1]["test"] == test_metrics
+    raw = [json.loads(line) for line in (tmp_path / "steps.jsonl").read_text().splitlines()]
+    assert any("test/auc_roc" in row for row in raw) and any("val/auc_roc" in row for row in raw)
+
+
+def test_step_metric_suppression_keeps_mandatory_scalar_and_jsonl_logs(tmp_path):
+    cfg = config()
+    cfg["step_metrics"] = False
+    current = trainer(tmp_path, cfg=cfg)
+    current.fit(evaluate)
+    boundaries = [row for row in current.run.logs if "train/lr" in row]
+    assert len(boundaries) == current.step
+    assert all("train/loss" in row and "train/acc" in row for row in boundaries)
+    assert not any("train/auc_roc" in row for row in boundaries)
+    assert len((tmp_path / "steps.jsonl").read_text().splitlines()) >= current.step
+
+
+def test_unauthorized_epoch_increase_rejected_and_extension_lr_restarted(tmp_path):
+    current = trainer(tmp_path)
+    current.fit(evaluate)
+    fractional = config()
+    fractional["epochs"] = 2.5
+    with pytest.raises(ValueError, match="positive integer"):
+        trainer(tmp_path, cfg=fractional, resume=True)
+    cfg = config()
+    cfg["epochs"] = 3
+    with pytest.raises(ValueError, match="authorization"):
+        trainer(tmp_path, cfg=cfg, resume=True)
+    current.artifacts.save({"id": Run.id, "config": config(), "warm_start": ""}, "run_identity.pt")
+    with pytest.raises(ValueError, match="explicit extend_epochs"):
+        ft.run_status(current.artifacts, cfg, resume=True)
+    status = ft.run_status(current.artifacts, config(), resume=True, extend_epochs=1)
+    resumed = trainer(tmp_path, cfg=status["config"], resume=True)
+    assert resumed.optimizer.param_groups[0]["lr"] > 0
+    assert resumed.bad == 0
+
+
+def test_probe_cpu_defaults_skip_and_explicit_smoke_restores_buffers_rng():
+    class BNModel(ft.SmokeModel):
+        def __init__(self):
+            super().__init__()
+            self.norm = torch.nn.BatchNorm3d(1)
+
+        def forward(self, x, views):
+            return super().forward(self.norm(x), views)
+
+    model = BNModel().eval()
+    before = ft.cpu_state(model)
+    rng = ft.rng_state()
+    assert (
+        ft.find_batch_size(lambda: pytest.fail("CPU default must not allocate"), Data(), device="cpu")["status"]
+        == "cpu"
+    )
+    report = ft.find_batch_size(
+        lambda: model, Data(), device="cpu", candidates=[2], max_batch=2, config={"grad_accum": 3}, smoke=True
+    )
+    assert report["trials"][0]["micro_steps"] == 6
+    assert not model.training and not model.norm.training
+    for key, value in model.state_dict().items():
+        torch.testing.assert_close(value, before[key], rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), rng["torch"], rtol=0, atol=0)
+    assert all(p.grad is None for p in model.parameters())
+
+
+def test_probe_failure_restores_rng_without_claiming_success():
+    rng = ft.rng_state()
+
+    def fail():
+        torch.rand(2)
+        raise RuntimeError("CUDA out of memory in construction")
+
+    with pytest.raises(RuntimeError, match="No candidate batch fits"):
+        ft.find_batch_size(fail, Data(), device="cpu", candidates=[2], max_batch=2, smoke=True)
+    torch.testing.assert_close(torch.get_rng_state(), rng["torch"], rtol=0, atol=0)
+
+
+def test_probe_rejects_overbudget_candidate_with_cpu_simulated_cuda(monkeypatch):
+    import contextlib
+    from types import SimpleNamespace
+
+    peak = {"bytes": 0}
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(total_memory=100e9))
+    for name in ("empty_cache", "reset_peak_memory_stats", "synchronize"):
+        monkeypatch.setattr(torch.cuda, name, lambda *args: None)
+    for name in ("memory_allocated", "memory_reserved", "max_memory_allocated", "max_memory_reserved"):
+        monkeypatch.setattr(torch.cuda, name, lambda device: peak["bytes"])
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (100e9 - peak["bytes"], 100e9))
+    monkeypatch.setattr(torch, "autocast", lambda *a, **k: contextlib.nullcontext())
+    to = torch.Tensor.to
+
+    def cpu_to(tensor, *args, **kwargs):
+        if args and isinstance(args[0], (str, torch.device)) and str(args[0]).startswith("cuda"):
+            args = (torch.device("cpu"), *args[1:])
+        return to(tensor, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "to", cpu_to)
+    model = ft.SmokeModel()
+    model.register_forward_pre_hook(lambda m, args: peak.update(bytes=20e9 if len(args[0]) == 1 else 60e9))
+    result = ft.find_batch_size(
+        lambda: model,
+        Data(),
+        device="cuda",
+        start=1,
+        candidates=[1, 2],
+        max_batch=2,
+        target_gb=50,
+        config={"amp_dtype": "bfloat16", "pin_memory": False},
+    )
+    assert result["batch_size"] == 1 and result["peak_gb"] == 20
+    assert not result["trials"][1]["ok"]
+
+
+def test_remote_threebranch_notebook_smoke_compatibility(monkeypatch):
+    monkeypatch.setenv("TB3_SMOKE", "1")
+    notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_train_3branch_crossgate.ipynb"
+    namespace = {"__name__": "__main__"}
+    for index, cell in enumerate(json.loads(notebook.read_text(encoding="utf-8"))["cells"]):
+        if cell["cell_type"] == "code":
+            exec(compile("".join(cell["source"]), f"<threebranch-cell-{index}>", "exec"), namespace)
+    assert namespace["RESULTS"]
+    assert (namespace["LAST"]["artifacts"].local / "info_theory.pt").exists()

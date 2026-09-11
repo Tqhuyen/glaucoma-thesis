@@ -9,8 +9,8 @@ logging, and experiments work) so agents don't guess.
 Master thesis: **3D CNN for glaucoma detection from OCT volumes**. One
 model-agnostic training pipeline that runs unchanged on Colab, vast.ai, a single
 GPU box, or multi-node SLURM. The thesis dataset is **Harvard-GF** (3D OCT
-volumes, 200³ uint8), with **raw 200³ data only** — no 96³/128³ downsampled
-configs.
+volumes, 200³ uint8). Storage resolution is config-driven for notebook
+experiments (`STORE_RES`: 200/128/96, …); the main pipeline config uses raw 200³.
 
 ## Criteria (what counts as "correct")
 
@@ -23,6 +23,15 @@ configs.
   config-driven, rank-0-only logging).
 - `forward()` contract: return `{"logits": tensor}` (or HF-style object with `.loss`).
 - DataLoader must return `(x, y)` tuples or dicts with `"labels"`.
+
+### Performance
+- Default to the fastest correct implementation: AMP (+ GradScaler), grad accumulation,
+  lazy/cached loaders, `pin_memory` + `non_blocking` on CUDA, vectorized ops, cached preprocessing.
+- Bound heavy analyses (MI/surrogate/X-AI/metrics) by subset/steps; never add GPU/CPU work that is
+  not needed or logged.
+- Pick batch size against the real config+data with `ft.find_batch_size` and a VRAM budget; keep the
+  effective batch constant via grad-accum and reuse the saved batch on resume.
+- Measure `sec/epoch` and peak VRAM before/after optimizing; keep the CPU smoke path fast.
 
 ### Tests
 - `make test` / `pytest tests -q` must pass (9 tests).
@@ -80,9 +89,16 @@ harvardairobotics/Harvard-GF (HF, per-scan .npz 'oct_bscans' 200³ uint8)
       normalize: minmax (default) | robust | none
   → pipeline/train.py
 ```
-- Store raw **200³** on disk; never persist downsampled arrays.
-- mmap (`cache_in_ram: false`) for 200³ (~26 GB); on Windows use `num_workers=0`
-  (mmap + multiprocessing can segfault).
+- Storage resolution is config-driven (`STORE_RES`: 200/128/96, …); model input
+  (`RES3D`/`RES2D`) is declared separately and resized on the fly. Never hardcode 200.
+- Always download from HF **with credentials** (`HF_TOKEN` from `.env`/Colab Secret,
+  passed as `token=`), and only the splits/patterns actually used
+  (`allow_patterns` / per-file `hf_hub_download`) — never the whole repo; prefer
+  `hf_transfer` for max speed.
+- Cache/reuse processed data (views, denoise, heavy augmentation); per case decide
+  whether it is worth uploading to a **versioned HF dataset repo** (method + params
+  + implementation hash) so later runs skip recompute — ask before uploading.
+- mmap stored volumes; on Windows use `num_workers=0` (mmap + multiprocessing can segfault).
 
 ### Training flow (pipeline/train.py)
 ```
@@ -138,6 +154,12 @@ config.yaml → validate_config (fast fail) → build loaders → build model
 4. **Never** disable or drop wandb to "save time" — it is the live experiment log.
 
 ### Notebook conventions
+- Full cell structure + hard rules when creating a training/sweep notebook:
+  [`docs/notebook-conventions.md`](docs/notebook-conventions.md) — canonical example is
+  `notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb`.
+- Data policy: authenticated selective HF download (token + `allow_patterns`),
+  config-driven `STORE_RES` (200/128/96/…), reuse caches, and evaluate versioned HF
+  upload for expensive processed data (denoise/views/augmentation).
 - Notebooks are standalone Colab experiments (inline code, `!pip`/`!git` cells).
 - **Every figure/model a notebook produces must be saved to Drive**: mount Drive,
   then copy `figures/**`, checkpoints, CSVs/meta to

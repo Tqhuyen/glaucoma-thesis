@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import Subset
 
 from scripts import final_data as fd
 from scripts import final_model as fm
@@ -39,6 +39,7 @@ BUNDLE_FILES = (
     "final_execution.py",
     "resolution_study.py",
     "compare_denoise_methods.py",
+    "information_theory.py",
 )
 
 
@@ -317,6 +318,18 @@ def raw_stage(root, *, revision=None, cpu_export_root=None):
     elif missing or (revision and not saved):
         from huggingface_hub import HfApi, snapshot_download
 
+        ft.load_env_file()
+        token = os.environ.get("HF_TOKEN")
+        if not token:
+            try:
+                from google.colab import userdata
+
+                token = userdata.get("HF_TOKEN")
+            except Exception as exc:
+                raise RuntimeError("Authenticated HF provenance/download requires HF_TOKEN") from exc
+        if not token:
+            raise RuntimeError("Authenticated HF provenance/download requires HF_TOKEN")
+
         plan_path = artifacts.local / "raw_download_plan.pt"
         if not plan_path.exists() and artifacts.remote and (artifacts.remote / plan_path.name).exists():
             artifacts.restore(plan_path.name)
@@ -325,7 +338,7 @@ def raw_stage(root, *, revision=None, cpu_export_root=None):
             if plan["source_repo"] != RAW_REPO or (revision and plan["source_revision"] != revision):
                 raise ValueError("Existing download plan revision mismatch; inspect provenance before changing it")
         else:
-            info = HfApi(token=os.environ.get("HF_TOKEN")).dataset_info(
+            info = HfApi(token=token).dataset_info(
                 RAW_REPO, revision=revision or (saved["source_revision"] if saved else None), files_metadata=True
             )
             if not re.fullmatch(r"[0-9a-f]{40}", info.sha) or (revision and info.sha != revision):
@@ -354,7 +367,7 @@ def raw_stage(root, *, revision=None, cpu_export_root=None):
                 repo_type="dataset",
                 revision=plan["source_revision"],
                 local_dir=str(data),
-                token=os.environ.get("HF_TOKEN"),
+                token=token,
                 allow_patterns=missing,
             )
         verify_raw_sources(root)
@@ -570,6 +583,8 @@ def datasets(root, config, *, splits=SPLITS):
 def audit_data_stage(root):
     context, artifacts = open_stage(root)
     config = dict(context["config"])
+    if config.get("extend_epochs", 0) or config.get("num_workers", 0):
+        raise ValueError("Final five-epoch profile requires extend_epochs=0 and num_workers=0")
     validate_profile(config)
     tr, _, _ = datasets(root, config)
     config["class_weights"] = [len(tr) / (2 * int((tr.labels == c).sum())) for c in (0, 1)]
@@ -581,6 +596,8 @@ def audit_data_stage(root):
 
 
 def validate_profile(config):
+    if config.get("extend_epochs", 0) or config.get("num_workers", 0):
+        raise ValueError("Final five-epoch profile requires extend_epochs=0 and num_workers=0")
     required = dict(
         dataset="bilateral",
         seed=42,
@@ -705,62 +722,34 @@ def preflight_stage(root, *, enabled=False):
         torch.cuda.set_per_process_memory_fraction(fraction, device)
         torch.cuda.reset_peak_memory_stats(device)
     snapshot = ft.rng_state()
-    model = optimizer = scaler = loader = iterator = batch = x = views = y = logits = loss = parameter = weights = None
     started = time.monotonic()
     report = {"status": "failed", "environment": environment, "free_before": free_before}
     probe_artifacts, run = stage_run(root, "preflight", config, "not-started")
     try:
-        model = make_model(config, device)
-        model.load_state_dict(torch.load(context["parent"], map_location="cpu", weights_only=True), strict=True)
-        model.train()
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=config["lr"],
-            weight_decay=config["weight_decay"],
-            **({"fused": True} if config["fused_adamw"] else {}),
+
+        def build_probe():
+            model = make_model(config, "cpu")
+            if not ft.load_weights(model, context["parent"]):
+                raise FileNotFoundError(context["parent"])
+            return model
+
+        probe = ft.find_batch_size(
+            build_probe,
+            train,
+            device=device,
+            start=config["batch_size"],
+            candidates=[config["batch_size"]],
+            max_batch=config["batch_size"],
+            target_gb=environment.get("total_memory", 0) * fraction / 1e9,
+            config=config,
+            optimizer_windows=config["preflight_windows"],
+            smoke=context["smoke"],
         )
-        scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and config["amp_dtype"] == "float16")
-        loader = DataLoader(train, batch_size=config["batch_size"], num_workers=0, pin_memory=config["pin_memory"])
-        iterator = iter(loader)
-        weights = torch.tensor(config["class_weights"], device=device)
-        for _ in range(config["preflight_windows"]):
-            denominator = 0.0
-            optimizer.zero_grad(set_to_none=True)
-            for _ in range(config["grad_accum"]):
-                try:
-                    batch = next(iterator)
-                except StopIteration:
-                    iterator = iter(loader)
-                    batch = next(iterator)
-                x, views, y = (t.to(device, non_blocking=config["non_blocking"]) for t in batch)
-                with torch.autocast(
-                    device.type, dtype=getattr(torch, config["amp_dtype"]), enabled=device.type == "cuda"
-                ):
-                    logits = model(x, views)
-                    loss = F.cross_entropy(logits, y, weight=weights, reduction="sum")
-                if not torch.isfinite(loss):
-                    raise FloatingPointError("Nonfinite preflight loss")
-                scaler.scale(loss).backward()
-                denominator += weights[y].sum().item()
-            scaler.unscale_(optimizer)
-            for parameter in model.parameters():
-                if parameter.grad is not None:
-                    parameter.grad.div_(denominator)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
-            old_scale = scaler.get_scale()
-            scaler.step(optimizer)
-            scaler.update()
-            if scaler.get_scale() < old_scale or not optimizer.state:
-                raise RuntimeError("Preflight must allocate optimizer state and complete updates")
+        report.update(probe["trials"][-1])
+        report["batch_probe"] = probe
+        if probe["batch_size"] != config["batch_size"]:
+            raise RuntimeError("Final preflight cannot change batch size")
         if device.type == "cuda":
-            torch.cuda.synchronize(device)
-            report.update(
-                allocated=torch.cuda.memory_allocated(device),
-                reserved=torch.cuda.memory_reserved(device),
-                peak_allocated=torch.cuda.max_memory_allocated(device),
-                peak_reserved=torch.cuda.max_memory_reserved(device),
-                free_after=torch.cuda.mem_get_info(device)[0],
-            )
             if report["peak_reserved"] > environment["total_memory"] * fraction or report["free_after"] < environment[
                 "total_memory"
             ] * (1 - fraction):
@@ -770,9 +759,6 @@ def preflight_stage(root, *, enabled=False):
         run.finish(exit_code=1)
         raise
     finally:
-        model = optimizer = scaler = loader = iterator = batch = x = views = y = logits = loss = parameter = weights = (
-            None
-        )
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -791,6 +777,24 @@ def preflight_stage(root, *, enabled=False):
             run.finish(exit_code=1)
             raise
     try:
+        import wandb
+
+        run.log(
+            {
+                "report/batch_probe_table": wandb.Table(
+                    columns=["batch_size", "peak_gb", "ok"],
+                    data=[[t["batch_size"], t["peak_gb"], t["ok"]] for t in probe["trials"]],
+                )
+            }
+        )
+        run.summary.update(
+            {
+                "batch/size": config["batch_size"],
+                "batch/accum": config["grad_accum"],
+                "batch/peak_gb": probe["peak_gb"],
+                "batch/target_gb": probe["target_gb"],
+            }
+        )
         run.log({f"preflight/{k}": v for k, v in report.items() if isinstance(v, (int, float, str))})
         finish_stage(probe_artifacts, run, {"parent_id": config["parent"]["wandb_id"], "digest": report["digest"]})
     except BaseException:
@@ -1082,6 +1086,20 @@ def report_stage(root):
     try:
         provenance = {**handoff, "prediction_identity": val["identity"], "report_code": code_identity()}
         fr.write_analysis(report, predictions, handoff["history"], artifacts, run, provenance)
+        ft.log_report(run, report)
+        import wandb
+
+        run.log(
+            {
+                "report/history_table": wandb.Table(
+                    columns=["epoch", "step", "train_loss", "train_acc", "val_auc"],
+                    data=[
+                        [h["epoch"], h.get("step"), h.get("loss"), h.get("train", {}).get("acc"), h.get("val_auc")]
+                        for h in handoff["history"]
+                    ],
+                )
+            }
+        )
         finish_stage(artifacts, run, provenance)
         return report
     except BaseException:
@@ -1128,5 +1146,250 @@ def completion_stage(root):
     marker = validated_completion(analysis)
     report = json.loads(analysis.restore("metrics.json").read_text(encoding="utf-8"))
     base.save({"analysis": marker, "report": report}, "final_summary.pt")
-    audit_files(base)
     return {"status": "analysis_complete", "train_id": marker["provenance"]["train_id"]}
+
+
+def information_stage(root, *, enabled=False, phase="collect", options=None):
+    if not enabled:
+        return {"status": "disabled"}
+    from scripts import information_theory as it
+
+    context, _ = open_stage(root, "information")
+    defaults = dict(
+        subset=8 if context["smoke"] else 128,
+        pca_dim=2 if context["smoke"] else 8,
+        input_res=2 if context["smoke"] else 4,
+        steps=2 if context["smoke"] else 100,
+        probe_steps=2 if context["smoke"] else 100,
+        hidden=8 if context["smoke"] else 32,
+        seeds=[0, 1] if context["smoke"] else [0, 1, 2, 3, 4],
+        surrogates=2 if context["smoke"] else 1000,
+        mine_surrogates=2 if context["smoke"] else 5,
+    )
+    options = defaults if options is None else dict(options)
+    for key, upper in dict(
+        subset=512,
+        pca_dim=32,
+        input_res=8,
+        steps=600,
+        probe_steps=600,
+        hidden=128,
+        surrogates=10000,
+        mine_surrogates=100,
+    ).items():
+        if not isinstance(options.get(key), int) or not 1 <= options[key] <= upper:
+            raise ValueError(f"Information analysis requires bounded {key} in [1,{upper}]")
+    if (
+        options["subset"] < 4
+        or not isinstance(options.get("seeds"), list)
+        or not 1 <= len(options["seeds"]) <= 10
+        or any(not isinstance(seed, int) or seed < 0 for seed in options["seeds"])
+    ):
+        raise ValueError("Information analysis requires subset>=4 and 1-10 explicit nonnegative seeds")
+    phases = ("collect", "probes", "estimators", "surrogates", "interactions", "plane", "report")
+    if phase not in phases:
+        raise ValueError("Unknown information-analysis phase")
+    _, collected = open_stage(root, "information/collect")
+    if phase == "collect":
+        ensure_idle()
+        handoff, weights = training_handoff(root)
+    else:
+        validated_completion(collected)
+        handoff = load(collected.restore("handoff.pt"))
+        if load(collected.restore("options.pt")) != options:
+            raise ValueError("Information options changed; use the saved collection options")
+    identity = digest(
+        {"weights": handoff["weights"], "data": handoff["config"]["data"], "options": options, "code": code_identity()}
+    )
+    _, existing = open_stage(root, "information/" + phase)
+    if (existing.local / "completed.pt").exists() or (existing.remote and (existing.remote / "completed.pt").exists()):
+        marker = validated_completion(existing)
+        if marker["provenance"]["identity"] != identity:
+            raise ValueError("Information cache identity mismatch; do not overwrite a different analysis")
+        return load(existing.restore("result.pt"))
+    artifacts, run = stage_run(
+        root, "information/" + phase, {**handoff["config"], "info_options": options}, handoff["train_id"]
+    )
+    snapshot = ft.rng_state()
+    model = None
+    try:
+        config = handoff["config"]
+        if phase == "collect":
+            environment = hardware(config["smoke"])
+            model = make_model(config, environment["device"])
+            if not ft.load_weights(model, weights):
+                raise FileNotFoundError(weights)
+            embeddings = {}
+            for name, source in (("train", "Training"), ("val", "Validation")):
+                (dataset,) = datasets(root, config, splits=(source,))
+                dataset.train = False
+                rng = np.random.default_rng(42)
+                count = min(options["subset"] // 2, *[int((dataset.labels == c).sum()) for c in (0, 1)])
+                if count < 2:
+                    raise ValueError("Information subsets need at least two scans per class")
+                indices = np.sort(
+                    np.concatenate(
+                        [rng.choice(np.flatnonzero(dataset.labels == c), count, replace=False) for c in (0, 1)]
+                    )
+                )
+                payload = it.collect_embeddings(
+                    model,
+                    Subset(dataset, indices.tolist()),
+                    config["batch_size"],
+                    input_res=options["input_res"],
+                    device=torch.device(environment["device"]),
+                    amp_dtype=config["amp_dtype"],
+                )
+                payload["indices"] = indices
+                embeddings[name] = payload
+            artifacts.save(embeddings, "embeddings.pt")
+            artifacts.save(handoff, "handoff.pt")
+            artifacts.save(options, "options.pt")
+            result = {
+                "identity": identity,
+                "samples": {s: len(e["y"]) for s, e in embeddings.items()},
+                "source_epoch": handoff["best_epoch"],
+                "test_used": False,
+            }
+            run.log({f"info/{s}_samples": n for s, n in result["samples"].items()})
+        elif phase == "report":
+            result = {
+                "options": options,
+                "provenance": handoff,
+                "test_used": False,
+                "limitations": [
+                    "Exploratory finite-sample estimates; negative MI estimates are not clamped.",
+                    "MIC is an approximation; interaction measures are proxies, not PID.",
+                    "Only a best-checkpoint information-plane snapshot is available, not an epoch trajectory.",
+                    "Validation estimates are not held-out test results; balanced scan subsets are not patient cohorts.",
+                    "For thesis inference use >=5 estimator seeds and >=1000 MIC surrogates; MINE p-values may be coarse.",
+                ],
+            }
+            for part in phases[1:-1]:
+                _, previous = open_stage(root, "information/" + part)
+                marker = validated_completion(previous)
+                if marker["provenance"]["identity"] != identity:
+                    raise ValueError("Information phase identities disagree")
+                result[part] = load(previous.restore("result.pt"))
+            artifacts.save(result, "info_theory.pt")
+            save_json(fr._json_safe(result), artifacts.local / "info_theory.json")
+            artifacts.sync(artifacts.local / "info_theory.json")
+            run.summary.update({"info/provenance": fr._json_safe(handoff), "info/options": options})
+        else:
+            data = load(collected.restore("embeddings.pt"))
+            groups = {}
+            for split, payload in data.items():
+                branches = {
+                    "3d": payload["e3d"],
+                    **{f"2d_{i}": payload["e2d"][:, i] for i in range(payload["e2d"].shape[1])},
+                }
+                groups[split] = {
+                    **branches,
+                    "fused": payload["z"],
+                    "concat": np.concatenate(list(branches.values()), axis=1),
+                    **{
+                        f"3d+{k}": np.concatenate([branches["3d"], v], axis=1) for k, v in branches.items() if k != "3d"
+                    },
+                }
+            train, val = groups["train"], groups["val"]
+            for name in train:
+                pca = it.PCA(options["pca_dim"]).fit(train[name])
+                train[name], val[name] = pca.transform(train[name]), pca.transform(val[name])
+            y = data["val"]["y"]
+            common = dict(steps=options["steps"], hidden=options["hidden"], device="cpu")
+            result = {}
+            if phase == "probes":
+                for name in train:
+                    for kind in ("logistic", "mlp"):
+                        result[name + "/" + kind] = it.linear_probe(
+                            train[name],
+                            data["train"]["y"],
+                            val[name],
+                            y,
+                            kind=kind,
+                            steps=options["probe_steps"],
+                            hidden=options["hidden"],
+                            seed=42,
+                        )
+            elif phase == "estimators":
+                entropy = it.label_entropy(y)
+                run.summary.update({"entropy/labels": entropy})
+                for name, values in val.items():
+                    stats = it.estimate_mi(values, y[:, None], seeds=options["seeds"], **common)
+                    for method, row in stats.items():
+                        row["normalized_median"] = row["median"] / entropy
+                        result[name + "/" + method] = row
+                        run.summary.update({f"mi/{name}/{method}/{k}": v for k, v in row.items() if k != "values"})
+                    result[name + "/mic"] = it.max_mic_features(values, y, pcs=options["pca_dim"])
+            elif phase == "surrogates":
+                for name, values in val.items():
+                    result[name + "/mic"] = it.surrogate_test(
+                        lambda a, b: it.max_mic_features(a, b, pcs=options["pca_dim"])["max_mic"],
+                        values,
+                        y,
+                        n=options["surrogates"],
+                        seed=42,
+                    )
+                    result[name + "/mine"] = it.surrogate_test(
+                        lambda a, b: it.mine_mi(a, b, seed=42, **common)["mi"],
+                        values,
+                        y[:, None],
+                        n=options["mine_surrogates"],
+                        seed=42,
+                    )
+                for name, row in result.items():
+                    row["bonferroni_alpha"] = 0.05 / len(result)
+                    run.summary.update({f"surrogate/{name}/{k}": v for k, v in row.items() if k != "null"})
+            elif phase == "interactions":
+                names = [name for name in val if name == "3d" or name.startswith("2d_")]
+                for i, left in enumerate(names):
+                    for right in names[i + 1 :]:
+                        result[left + "+" + right] = {
+                            **it.interaction_information(val[left], val[right], y, seeds=options["seeds"], **common),
+                            **it.conditional_mi(val[left], val[right], y[:, None], seed=42, **common),
+                        }
+                        run.summary.update(
+                            {f"interaction/{left}+{right}/{k}": v for k, v in result[left + "+" + right].items()}
+                        )
+            elif phase == "plane":
+                result["best_checkpoint_only"] = it.information_plane(
+                    data["val"]["x"],
+                    [val["fused"]],
+                    y,
+                    pca_dim=options["pca_dim"],
+                    probe_steps=options["probe_steps"],
+                    mine_steps=options["steps"],
+                    hidden=options["hidden"],
+                    seed=42,
+                )[0]
+                result["best_checkpoint_only"]["epoch"] = handoff["best_epoch"]
+            import wandb
+
+            table_names = dict(
+                probes="probe",
+                estimators="mi_estimators",
+                surrogates="surrogate",
+                interactions="interaction",
+                plane="plane",
+            )
+            keys = sorted({k for row in result.values() for k, v in row.items() if not isinstance(v, (list, dict))})
+            run.log(
+                {
+                    f"report/{table_names[phase]}_table": wandb.Table(
+                        columns=["representation", *keys],
+                        data=[[name, *[fr._json_safe(row.get(k)) for k in keys]] for name, row in result.items()],
+                    )
+                }
+            )
+        artifacts.save(result, "result.pt")
+        finish_stage(artifacts, run, {"identity": identity, "train_id": handoff["train_id"], "phase": phase})
+        return result
+    except BaseException:
+        run.finish(exit_code=1)
+        raise
+    finally:
+        model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        ft.restore_rng(snapshot)

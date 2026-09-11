@@ -2,7 +2,7 @@
 
 ## 1. Phạm vi cố định
 
-Chỉ notebook [3d_glaucoma_final_2x2d_3d_crossgate.ipynb](../notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb) được chuẩn hóa trong lượt này. Notebook sweep là nguồn tham khảo bố cục, không bị sửa. “Lưu DB” trong yêu cầu được thực hiện bằng **W&B + các artifact có kiểm tra nội dung trên Google Drive**, không bổ sung SQLite hoặc máy chủ DB.
+Notebook [3d_glaucoma_final_2x2d_3d_crossgate.ipynb](../notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb) là đối tượng chuẩn hóa trong lượt này. Notebook sweep là nguồn tham khảo bố cục, không bị sửa. Theo xác nhận của người dùng, các commit mới trên remote được hợp nhất: giữ notebook ba nhánh đã có, khả năng dò batch/worker, mở rộng epoch và bộ phân tích information theory. Preset model cuối vẫn giữ nguyên phạm vi Bilateral 5 epoch, không tự chạy notebook khác. “Lưu DB” được thực hiện bằng **W&B + các artifact có kiểm tra nội dung trên Google Drive**, không bổ sung SQLite hoặc máy chủ DB.
 
 | Thành phần | Cấu hình |
 |---|---|
@@ -53,7 +53,8 @@ Nếu checkpoint gốc hoặc cache không khớp, dừng để giải quyết �
 | 9 | Inference validation/test độc lập | Có nếu chưa có logits; chỉ khi bật |
 | 10 | Calibration, metrics, bootstrap, plots và báo cáo từ logits | CPU, không train lại |
 | 11 | XAI độc lập | Có ở run thật nếu bật |
-| 12 | Audit nội dung artifact và công bố tổng hợp | Không cần GPU |
+| 12 | Information theory tùy chọn: thu thập embedding rồi phân tích theo từng bước | Cần model khi thu thập; các bước sau chạy CPU |
+| 13 | Audit nội dung artifact và công bố tổng hợp | Không cần GPU |
 
 Ở run thật, các cờ dưới đây mặc định là `False`:
 
@@ -86,11 +87,11 @@ Sau khi section 8 lưu handoff và best weights thành công, bật section 9:
 ENABLE_EVAL = True
 ```
 
-Sau section 9, chạy section 10 và 12. Không cần bật XAI để có bảng kết quả đầy đủ. `Run all` với cấu hình mặc định không tự train, nhưng vẫn có thể thực hiện các bước CPU/network đã cho phép; nó không phải chế độ chỉ xem notebook.
+Sau section 9, chạy section 10 và 13. Không cần bật XAI hoặc information theory để có bảng kết quả phân loại đầy đủ. `Run all` với cấu hình mặc định không tự train, nhưng vẫn có thể thực hiện các bước CPU/network đã cho phép; nó không phải chế độ chỉ xem notebook.
 
 ## 4. Preflight thực sự kiểm tra gì?
 
-Preflight yêu cầu CUDA, tổng VRAM tối thiểu 70 GiB và đủ bộ nhớ trống cho ngân sách được đặt. Nó dùng **toàn model**, volume 200³, hai view 224², đúng batch/precision/backend. Hai cửa sổ optimizer tương ứng 16 microbatch được chạy trên model dùng thử, gồm cấp phát trạng thái Adam và backward khi gradient đã tồn tại.
+Preflight yêu cầu CUDA, tổng VRAM tối thiểu 70 GiB và đủ bộ nhớ trống cho ngân sách được đặt. Nó gọi `ft.find_batch_size` với tập ứng viên chỉ gồm batch 2 cho preset này: xác minh batch đã chọn, không âm thầm đổi điều kiện thí nghiệm. Nó dùng **toàn model**, volume 200³, hai view 224², đúng batch/precision/backend. Hai cửa sổ optimizer tương ứng 16 microbatch được chạy trên model dùng thử, gồm cấp phát trạng thái Adam và backward khi gradient đã tồn tại.
 
 Preflight không gọi `Trainer.fit`, không chạy epoch dữ liệu thật và không ghi đè checkpoint training. Nó có cập nhật optimizer của model dùng thử, sau đó giải phóng model đó và khôi phục RNG. Report ghi peak allocated/reserved, thông tin GPU/software, thời gian và định danh cấu hình/code/data/parent. Training chỉ được chạy với preflight khớp các định danh này.
 
@@ -139,7 +140,9 @@ Phiên bản này dùng module báo cáo riêng cho model cuối. AP xử lý đ
 
 Do định nghĩa/calculation được chuẩn hóa, **không âm thầm thay các số AP/ECE cũ**. Các báo cáo mới lưu version của metric; đối chiếu raw–Bilateral cần cùng cách tính nếu có đủ logits/dự đoán cũ. Không có logits cũ thì ghi rõ khác biệt quy trình thay vì giả vờ đã tính lại.
 
-Sau khi logits validation/test đã lưu, chỉ cần section 1–2, 10 và 12 để tạo lại báo cáo ở runtime CPU. Không cần dataset hoặc model và không gọi train. CI là bootstrap theo scan với temperature/threshold cố định, không phải patient-level CI hoặc bằng chứng về biến thiên qua seed.
+Sau khi logits validation/test đã lưu, chỉ cần section 1–2, 10 và 13 để tạo lại báo cáo ở runtime CPU. Không cần dataset hoặc model và không gọi train. CI là bootstrap theo scan với temperature/threshold cố định, không phải patient-level CI hoặc bằng chứng về biến thiên qua seed.
+
+Section 12 giữ phân tích information theory thành bảy bước có artifact trung gian: collection, probes, estimators, surrogates, interactions, information plane và reporting. Mặc định tắt ở run thật. Chỉ dùng tập con có giới hạn của training/validation, không dùng test để điều chỉnh estimator; các bước sau thu thập embedding không cần train lại encoder. Information plane hiện là ảnh chụp của best checkpoint, không phải quỹ đạo qua epoch. Các ước lượng MI/MIC và tương tác phải được mô tả như phân tích thăm dò, không phải bằng chứng nhân quả hay số đo thông tin tuyệt đối chính xác.
 
 ## 8. Kiểm thử và giới hạn bàn giao
 

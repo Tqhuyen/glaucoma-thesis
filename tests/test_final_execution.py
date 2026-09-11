@@ -101,7 +101,7 @@ def test_numbered_sections_and_no_fit_in_analysis():
     path = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     headings = ["".join(c["source"]).splitlines()[0] for c in notebook["cells"] if c["cell_type"] == "markdown"]
-    assert len(headings) == 13
+    assert len(headings) == 14
     for number, heading in enumerate(headings):
         assert heading.lstrip("# ").startswith(f"{number}.")
     for fn in (fx.evaluation_stage, fx.report_stage, fx.xai_stage, fx.preflight_stage):
@@ -507,6 +507,8 @@ def test_parent_raw_identities_survive_and_changed_raw_blocks_before_filter(prep
 def hf_fixture(prepared, monkeypatch, *, bad_sha=False):
     import huggingface_hub
 
+    monkeypatch.setenv("HF_TOKEN", "mock-token-no-network")
+
     context = {**prepared.context, "smoke": False}
     prepared.artifacts.save(context, "context.pt")
     data = Path(context["data_root"])
@@ -759,3 +761,52 @@ def test_pinned_timm_maxvit_cpu_construction_without_pretrained_download(monkeyp
     assert calls == ["maxvit_tiny_rw_224", "maxvit_tiny_rw_224"]
     assert len(model.enc2ds) == 2 and model.head.in_features == 256 and model.head.out_features == 2
     assert all(p.device.type == "cpu" for p in model.parameters())
+
+
+def test_information_phases_restore_independently_without_training_or_test_use(prepared, monkeypatch):
+    fx.preflight_stage(prepared.root, enabled=True)
+    fx.training_stage(prepared.root, enabled=True)
+    fx.evaluation_stage(prepared.root, enabled=True)
+    fx.report_stage(prepared.root)
+    first = fx.information_stage(prepared.root, enabled=True, phase="collect")
+    assert first["test_used"] is False
+    _, analysis = fx.open_stage(prepared.root, "analysis")
+    completed = fx.validated_completion(analysis)
+    monkeypatch.setattr(fx, "make_model", lambda *a, **k: pytest.fail("CPU information phase allocated model"))
+    monkeypatch.setattr(fx, "datasets", lambda *a, **k: pytest.fail("CPU information phase reread data"))
+    monkeypatch.setattr(ft.Trainer, "fit", lambda *a, **k: pytest.fail("Information phase retrained"))
+    for phase in ("probes", "estimators", "surrogates", "interactions", "plane", "report"):
+        fx.information_stage(prepared.root, enabled=True, phase=phase)
+    assert fx.validated_completion(analysis) == completed
+    report = json.loads((prepared.root / "information/report/info_theory.json").read_text())
+    assert report["test_used"] is False
+    assert report["plane"]["best_checkpoint_only"]["epoch"] == 1
+    assert not list((prepared.root / "information").rglob("*.png"))
+    assert all(run.finishes == [0] for run in prepared.runs)
+    assert fx.information_stage(prepared.root, enabled=True, phase="report")["options"] == report["options"]
+
+
+def test_information_failure_does_not_invalidate_analysis(prepared, monkeypatch):
+    from scripts import information_theory as it
+
+    fx.preflight_stage(prepared.root, enabled=True)
+    fx.training_stage(prepared.root, enabled=True)
+    fx.evaluation_stage(prepared.root, enabled=True)
+    fx.report_stage(prepared.root)
+    fx.information_stage(prepared.root, enabled=True, phase="collect")
+    monkeypatch.setattr(it, "estimate_mi", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("estimator failed")))
+    with pytest.raises(RuntimeError, match="estimator failed"):
+        fx.information_stage(prepared.root, enabled=True, phase="estimators")
+    assert prepared.runs[-1].finishes == [1]
+    ft.atomic_save(
+        {"optional": "publication pending"}, prepared.root / "information/estimators/result.pt.sync-pending.pt"
+    )
+    assert fx.completion_stage(prepared.root)["status"] == "analysis_complete"
+    assert fx.information_stage(prepared.root / "not_a_run")["status"] == "disabled"
+
+
+def test_final_profile_rejects_epoch_extension_and_worker_drift(prepared):
+    config = fx.load(prepared.root / "execution.pt")
+    for key in ("extend_epochs", "num_workers"):
+        with pytest.raises(ValueError, match="five-epoch profile"):
+            fx.validate_profile({**config, key: 1})
