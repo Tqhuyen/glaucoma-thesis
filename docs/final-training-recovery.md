@@ -1,5 +1,26 @@
 # Huấn luyện CrossGate: W&B, checkpoint và khôi phục
 
+## Preset hiện hành: fine-tune Bilateral 5 epoch
+
+Notebook hiện chỉ chạy **`bilateral_s42`**, khởi tạo từ best model của giai đoạn raw mới nhất:
+
+```text
+/content/drive/MyDrive/MasterBKDN/Thesis/final_2x2d_3d_crossgate/
+raw_s42_recovered_20260910/raw_s42/best_weights.pt
+```
+
+Đây là đường dẫn được tạo bởi cấu hình lần chạy trước, chưa được kiểm tra trực tiếp trên Drive trong phiên sửa code này. Notebook kiểm tra file tồn tại trước khi chuẩn bị dữ liệu; nếu thiếu thì báo lỗi, không dùng lại file emergency cũ và không train từ khởi tạo ngẫu nhiên.
+
+- Nhóm mới: `bilateral_s42_finetune5_from_raw_recovered`, không ghi đè run raw.
+- Thời lượng: 5 epoch bổ sung, LR `5e-5`, batch 2, tích lũy 8, seed 42. Patience 5 không cắt ngắn ngân sách 5 epoch thông thường.
+- Cả Training, Validation và Test đều đọc `*_volumes_dn.npy`; cả Slab MIP và Full AIP đều được tạo từ chính dữ liệu Bilateral tương ứng.
+- Tham số Bilateral: `sigma_color=0.10`, `sigma_spatial=4.0`. Cache hoàn tất đúng cấu hình được tái sử dụng; cache thiếu/dở phải xử lý trước training, không thay bằng raw.
+- Best checkpoint được chọn bằng AUC validation Bilateral trong giai đoạn fine-tune. Sau train, fit temperature và threshold trên validation Bilateral rồi đánh giá test Bilateral.
+- W&B, checkpoint và Drive giữ nguyên cơ chế bảo vệ. XAI tắt mặc định ở run thật (`RUN_XAI=False`) để không tốn thêm nhiều forward/backward ngoài yêu cầu train và đánh giá.
+- Kết quả này phải mô tả là **fine-tune 5 epoch trên Bilateral từ model đã học trên raw**, không phải huấn luyện từ đầu hoàn toàn trên Bilateral.
+
+Các mục dưới đây giải thích cơ chế chung và lưu lại hướng dẫn cho giai đoạn cứu hộ trước. Preset Bilateral ở trên thay thế preset raw cũ.
+
 ## 1. Phiên bản mới
 
 Notebook: [3d_glaucoma_final_2x2d_3d_crossgate.ipynb](../notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb).
@@ -10,7 +31,7 @@ Các thay đổi trên máy local không tự cập nhật kernel Colab đang m�
 
 ## 2. Tiếp tục từ file trọng số vừa cứu
 
-Notebook hiện đã điền preset `raw_s42_recovered_20260910`: chỉ raw, seed 42, warm-start từ file cứu hộ, tối đa 10 epoch bổ sung, LR `5e-5`, batch 2, tích lũy 8, patience 5 và checkpoint mỗi 10 bước optimizer. Lựa chọn raw/42 dựa trên log local `raw_s42_validation_log.csv` có 22 epoch; bản thân file trọng số không xác nhận nguồn gốc hoặc epoch. Các cấu hình trong ví dụ dưới đây có thể dùng cho một nhóm mới khác; preset hiện hành đã được điền trực tiếp trong notebook.
+Preset trước đây là `raw_s42_recovered_20260910`: chỉ raw, seed 42, warm-start từ file cứu hộ, tối đa 10 epoch bổ sung. Preset đó đã được thay bằng Bilateral 5 epoch ở đầu tài liệu. Không dùng lại ví dụ cứu hộ dưới đây cho giai đoạn Bilateral hiện tại.
 
 File đã cứu là state dictionary, không có optimizer, scheduler, epoch hoặc RNG. Vì vậy đây là **warm-start**, không phải resume chính xác lần train cũ. Bộ trọng số được giữ lại; trạng thái huấn luyện và W&B bắt đầu mới.
 
@@ -117,4 +138,4 @@ Hai ảnh chiếu của run bilateral được tạo từ thể tích bilateral,
 
 Bộ kiểm thử gồm checkpoint round-trip, warm-start, config mismatch, lỗi Drive, resume sweep, bảo toàn bảng tổng hợp, cache denoise và SIGINT thật khi còn gradient tích lũy. Notebook được chạy tuần tự toàn bộ code cell bằng dữ liệu synthetic CPU và model nhỏ ở chế độ smoke, với W&B offline được bật tường minh.
 
-Kết quả kiểm tra local: **34 tests passed**. Có một cảnh báo backward hook từ Grad-CAM. Chưa kiểm thử W&B online, Google Drive thật, CUDA AMP hoặc huấn luyện toàn bộ MaxViT/ResNeXt3D trên dữ liệu 200³. Smoke không chứng minh hội tụ hoặc hiệu năng chẩn đoán của mô hình thật.
+Kết quả kiểm tra local: **35 tests passed**, gồm kiểm tra preset Bilateral 5 epoch và smoke thực sự đi qua bước lọc Bilateral, đọc ba split denoise và tạo view từ nguồn denoise. Có một cảnh báo backward hook từ Grad-CAM trong smoke. Chưa kiểm thử W&B online, Google Drive thật, CUDA AMP hoặc huấn luyện toàn bộ MaxViT/ResNeXt3D trên dữ liệu 200³. Smoke không chứng minh hội tụ hoặc hiệu năng chẩn đoán của mô hình thật.

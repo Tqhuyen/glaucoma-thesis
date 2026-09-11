@@ -346,6 +346,22 @@ def test_partial_denoise_and_per_source_views(tmp_path, channel):
     torch.testing.assert_close(ds[0][0], ds[0][0], rtol=0, atol=0)
 
 
+def test_notebook_bilateral_finetune_preset():
+    notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
+    cells = json.loads(notebook.read_text(encoding="utf-8"))["cells"]
+    source = next("".join(c["source"]) for c in cells if "RUN_GROUP = " in "".join(c["source"]))
+    namespace = {"SMOKE": False}
+    exec(source.split("SMOKE_ROOT =")[0], namespace)
+    assert namespace["DATASETS"] == ["bilateral"]
+    assert namespace["RUN_TARGET"] == namespace["WARM_START_TARGET"] == "bilateral_s42"
+    assert namespace["EPOCHS"] == 5
+    assert namespace["PATIENCE"] >= namespace["EPOCHS"]
+    assert namespace["BUILD_DENOISED"]
+    assert namespace["WARM_START_WEIGHTS"].endswith("raw_s42_recovered_20260910/raw_s42/best_weights.pt")
+    assert not namespace["RESUME"]
+    assert not namespace["RUN_XAI"]
+
+
 def test_notebook_smoke_offline_end_to_end(monkeypatch):
     monkeypatch.setenv("FINAL_SMOKE", "1")
     notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
@@ -353,8 +369,14 @@ def test_notebook_smoke_offline_end_to_end(monkeypatch):
     for index, cell in enumerate(json.loads(notebook.read_text(encoding="utf-8"))["cells"]):
         if cell["cell_type"] == "code":
             exec(compile("".join(cell["source"]), f"<notebook-cell-{index}>", "exec"), namespace)
-    assert list(namespace["RESULTS"]) == ["raw_s42"]
-    local = namespace["LOCAL_ROOT"] / "raw_s42"
+    assert list(namespace["RESULTS"]) == ["bilateral_s42"]
+    local = namespace["LOCAL_ROOT"] / "bilateral_s42"
+    assert namespace["config"]["denoise_method"] == "bilateral"
+    for dataset, split in zip((namespace["tr"], namespace["va"], namespace["te"]), namespace["SPLITS"]):
+        assert dataset.source.name == f"{split}_volumes_dn.npy"
+        assert "_volumes_dn_views_" in str(dataset.views.filename)
+        raw = np.load(namespace["DATA_ROOT"] / f"{split}_volumes.npy")
+        assert not np.array_equal(raw, dataset.volumes)
     assert (local / "last.pt").exists()
     assert (local / "metrics.json").exists()
     assert (local / "gradcam3d.png").exists()
@@ -368,7 +390,7 @@ def test_notebook_smoke_offline_end_to_end(monkeypatch):
     )
     monkeypatch.setattr(ft, "init_wandb", lambda *a, **k: pytest.fail("Completed run should be skipped"))
     exec(compile("".join(train_cell["source"]), "<resume-completed>", "exec"), namespace)
-    assert list(namespace["RESULTS"]) == ["raw_s42"]
+    assert list(namespace["RESULTS"]) == ["bilateral_s42"]
 
 
 def test_sweep_status_new_initialized_resume_and_completed_remote(tmp_path):
