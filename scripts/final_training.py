@@ -81,9 +81,42 @@ class Artifacts:
         self.sync(path)
         return path
 
+    def fetch(self, name):
+        path = self.local / name
+        if path.exists() or self.remote is None:
+            return path
+        source = self.remote / name
+        if not source.exists():
+            return path
+        print(f"[fetch] {name} from Drive", flush=True)
+        temporary = path.with_name(path.name + ".tmp-" + uuid.uuid4().hex)
+        try:
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return path
+
+
+def saved_config(*roots):
+    for root in roots:
+        path = Path(root) / "run_identity.pt"
+        if path.is_file():
+            return torch.load(path, map_location="cpu", weights_only=False)["config"]
+    return None
+
 
 def _config_without_epochs(config):
     return {key: value for key, value in config.items() if key != "epochs"}
+
+
+def _config_diff(old, new):
+    keys = sorted(set(old) | set(new))
+    return {
+        key: {"saved": old.get(key, "<missing>"), "current": new.get(key, "<missing>")}
+        for key in keys
+        if old.get(key, "<missing>") != new.get(key, "<missing>")
+    }
 
 
 def _config_compatible(old, new):
@@ -123,7 +156,10 @@ def run_status(artifacts, config, *, resume, extend_epochs=0):
         raise FileExistsError("Run already exists: enable RESUME or choose a new RUN_GROUP")
     state = torch.load(identity, map_location="cpu", weights_only=False)
     if _config_without_epochs(state["config"]) != _config_without_epochs(config):
-        raise ValueError("Run config mismatch; use a new run directory")
+        diff = _config_diff(_config_without_epochs(state["config"]), _config_without_epochs(config))
+        raise ValueError(
+            f"Run config mismatch; use a new run directory. Differing keys: {json.dumps(diff, default=str)}"
+        )
     if not extend_epochs and int(config["epochs"]) > int(state["config"]["epochs"]):
         raise ValueError("Increasing epochs requires explicit extend_epochs")
     target = int(state["config"]["epochs"]) + int(extend_epochs)
@@ -255,10 +291,7 @@ def init_wandb(name, config, artifacts, *, resume=False, smoke=False, warm_start
 
     identity = artifacts.local / "run_identity.pt"
     if resume:
-        if not identity.exists() and artifacts.remote:
-            source = artifacts.remote / identity.name
-            if source.exists():
-                atomic_save(torch.load(source, weights_only=False, map_location="cpu"), identity)
+        identity = artifacts.fetch("run_identity.pt")
         state = torch.load(identity, weights_only=False, map_location="cpu")
         if state["config"] != config:
             raise ValueError("Run config mismatch; use a new run directory for warm-start")
@@ -532,11 +565,7 @@ class Trainer:
         if not resume and (artifacts.local / "last.pt").exists():
             raise FileExistsError("Refusing to overwrite last.pt without resume")
         if resume:
-            path = artifacts.local / "last.pt"
-            if not path.exists() and artifacts.remote:
-                source = artifacts.remote / "last.pt"
-                if source.exists():
-                    atomic_save(torch.load(source, map_location="cpu", weights_only=False), path)
+            path = artifacts.fetch("last.pt")
             state = torch.load(path, map_location="cpu", weights_only=False)
             if (
                 state.get("format") != 1
