@@ -148,6 +148,8 @@ Section 12 giữ phân tích information theory thành bảy bước có artifac
 
 Đã kiểm thử local toàn bộ notebook theo thứ tự ở chế độ synthetic CPU, lọc Bilateral thực sự trên dữ liệu nhỏ, W&B offline và Drive mô phỏng. Bộ test bao gồm metric ties, calibration, cache corruption/relocation, nhập CPU export, kiểm tra parent/raw hashes, resume, SIGINT, stage thư mục thật với W&B giả, artifact checksum và rerender không train lại.
 
+Kiểm chứng bản triển khai: trên một Git worktree sạch, chỉ chứa các file đã commit, `python -m pytest tests -q` đạt **162 passed, 1 skipped**. Test bị bỏ qua chỉ đối chiếu mã nguồn của công cụ CPU export tùy chọn không nằm trong bản triển khai; các test nhập/kiểm tra format export bằng fixture vẫn chạy. Cả notebook cuối và notebook ba nhánh được giữ từ remote đều qua smoke CPU/offline. Ruff lint/format của các file được sửa đều đạt; có hai cảnh báo backward hook Grad-CAM trong smoke. Bộ test trong workspace làm việc có thêm test chưa commit của tác vụ khác nên số lượng khác; không dùng số lượng đó để mô tả bản GitHub.
+
 Chưa trực tiếp xác minh file parent của bạn trên Drive, W&B online, Drive mount thật hoặc model 200³ trên GPU 80 GB. Không tuyên bố tốc độ tối đa hoặc độ chính xác phân loại được bảo đảm. Các section CPU và preflight phải xác nhận điều kiện thực tế trước khi bạn bật training.
 
 Mã được triển khai theo một bộ hash nguồn đã review. Notebook cũ hoặc clone thiếu script mới sẽ bị từ chối trước khi chạy công việc nặng; không tự reset/pull đè thay đổi của người dùng. Dùng notebook và các helper từ cùng phiên bản GitHub, tốt nhất trên runtime mới.
