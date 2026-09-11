@@ -467,13 +467,18 @@ def interaction_information(x, y, labels, *, steps=600, hidden=64, seeds=(0, 1, 
     }
 
 
-def collect_embeddings(model, dataset, batch_size, *, input_res=None, device=None):
+def collect_embeddings(model, dataset, batch_size, *, input_res=None, device=None, num_workers=0):
     device = device or next(model.parameters()).device
     model.eval()
     fused, e3d, e2d, inputs, labels, logits = [], [], [], [], [], []
     pin = device.type == "cuda"
     with torch.no_grad():
-        for x, views, target in DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=pin):
+        for x, views, target in DataLoader(
+            dataset,
+            batch_size=batch_size,
+            num_workers=max(0, int(num_workers)),
+            pin_memory=pin,
+        ):
             x = x.to(device, non_blocking=True)
             views = views.to(device, non_blocking=True)
             z, tokens = model.fuse(x, views)

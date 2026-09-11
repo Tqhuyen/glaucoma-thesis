@@ -29,6 +29,8 @@ experiments (`STORE_RES`: 200/128/96, …); the main pipeline config uses raw 20
   lazy/cached loaders, `pin_memory` + `non_blocking` on CUDA, vectorized ops, cached preprocessing.
 - Bound heavy analyses (MI/surrogate/X-AI/metrics) by subset/steps; never add GPU/CPU work that is
   not needed or logged.
+- Pick batch size against the real config+data with `ft.find_batch_size` and a VRAM budget; keep the
+  effective batch constant via grad-accum and reuse the saved batch on resume.
 - Measure `sec/epoch` and peak VRAM before/after optimizing; keep the CPU smoke path fast.
 
 ### Tests

@@ -227,8 +227,15 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - **Tải dữ liệu**: `allow_patterns` chỉ tải phần dùng; token + `hf_transfer` để tối đa băng thông.
 - **AMP/TF32**: bf16 nếu có, ngược lại fp16 + GradScaler; trên CUDA bật `cudnn.benchmark=True` và TF32 cho
   matmul/conv khi phần cứng hỗ trợ; `torch.compile` chỉ dùng sau khi kiến trúc đã ổn định.
-- **Batch theo VRAM**: tăng batch/`grad_accum` tới ngưỡng an toàn; model input ở mức đủ dùng, không cao hơn
-  mức có ích; tránh OOM giữa run.
+- **Batch theo VRAM**: thay vì đoán, **chọn batch size theo cấu hình train + dữ liệu hiện tại** bằng
+  `ft.find_batch_size(build_model, train_dataset, device=DEVICE, start=BS, target_gb=TARGET_VRAM_GB,
+  num_workers=NUM_WORKERS)`. Helper chạy forward+backward+optimizer step thật trên chính model/dataset với batch
+  tăng gấp đôi, đo peak VRAM và chọn batch lớn nhất trong ngân sách (`min(TARGET_VRAM_GB, VRAM_total*0.9)` để chừa
+  headroom cho eval/X-AI). Giữ effective batch không đổi: `GRAD_ACCUM = max(1, round(EFFECTIVE_BATCH / BS))`.
+- **Resume an toàn config**: khi `RESUME=True`, lấy lại `batch_size`/`grad_accum` từ `run_identity.pt` thay vì
+  probe lại, để identity/config không đổi. Log `batch/size`, `batch/accum`, `batch/peak_gb`, `batch/target_gb` +
+  bảng `report/batch_probe_table`. Trên CPU/không CUDA, probe trả `start` với `status="cpu"` và không chạy.
+- **num_workers**: Linux/Colab dùng >0 (dataset augment per-sample nên kết quả không đổi), Windows để 0.
 - **Phân tích nặng** (MINE/surrogate/probe/IB, X-AI): giới hạn subset/steps/PCA-dim; cache embedding thay vì
   forward lại; log bảng/giá trị thay vì lưu tensor lớn.
 - **Không tính lại cái đã có**: tái sử dụng cache (local/Drive) và cân nhắc upload HF cho preprocessing đắt.
@@ -266,6 +273,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - [ ] AMP bật khi CUDA + `pin_memory`/`non_blocking`; hạn chế `.item()`/đồng bộ host trong vòng train.
 - [ ] Loader lazy/cache, chỉ đọc dữ liệu dùng đến; preprocessing đắt được cache/tái sử dụng.
 - [ ] Đo `sec/epoch` + peak VRAM; phân tích nặng (MI/X-AI) có giới hạn subset/steps.
+- [ ] Batch size chọn theo cấu hình+dữ liệu (`ft.find_batch_size`) tới ngân sách VRAM; giữ effective batch qua grad-accum; resume dùng lại batch đã lưu.
 - [ ] Best checkpoint theo val AUC; threshold/calibration fit trên val, không dùng test.
 - [ ] Resume-safe: `results.json` append + checkpoint atomic.
 - [ ] Cell train hỗ trợ gia hạn (`RESUME=True` + `EXTEND_EPOCHS=N`) mà không cần `RUN_GROUP` mới.

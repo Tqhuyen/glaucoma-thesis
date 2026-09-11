@@ -157,6 +157,11 @@ def test_warm_start_is_weights_only_and_mismatch_rejected(tmp_path):
         trainer(tmp_path / "new", warm_start=str(path))
 
 
+def test_find_batch_size_returns_start_without_cuda():
+    result = ft.find_batch_size(lambda: ft.SmokeModel(), Data(), device=torch.device("cpu"), start=3)
+    assert result == {"batch_size": 3, "peak_gb": 0.0, "status": "cpu", "trials": []}
+
+
 def test_load_weights_missing_fresh_and_emergency_payload(tmp_path):
     source = ft.SmokeModel()
     path = tmp_path / "weights.pt"
@@ -288,7 +293,7 @@ def test_calibration_threshold_and_bootstrap_use_same_scale(monkeypatch):
 
     logits = np.array([[4.0, 0.0], [0.0, 4.0]], dtype=np.float32)
     labels = np.array([0, 1])
-    monkeypatch.setattr(ft, "predict", lambda *args: (None, labels, logits))
+    monkeypatch.setattr(ft, "predict", lambda *args, **kwargs: (None, labels, logits))
     monkeypatch.setattr(fm, "temperature_scale", lambda *args, **kwargs: 2.0)
     expected = torch.softmax(torch.tensor(logits) / 2.0, 1)[:, 1].numpy()
 

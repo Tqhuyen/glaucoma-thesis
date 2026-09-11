@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import csv
+import gc
 import hashlib
 import io
 import json
@@ -308,8 +309,56 @@ def load_weights(model, path):
     return True
 
 
+def find_batch_size(build_model, dataset, *, device, start=2, target_gb=0.0, max_batch=256, num_workers=0):
+    start = max(1, int(start))
+    if device.type != "cuda":
+        return {"batch_size": start, "peak_gb": 0.0, "status": "cpu", "trials": []}
+    total_gb = torch.cuda.get_device_properties(device).total_memory / 1e9
+    budget_gb = min(float(target_gb), total_gb * 0.9) if target_gb else total_gb * 0.85
+    trials, best, peak_used = [], start, 0.0
+    candidate = start
+    while candidate <= int(max_batch):
+        model = build_model().to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        scaler = torch.amp.GradScaler("cuda", enabled=True)
+        loader = DataLoader(
+            Subset(dataset, list(range(min(candidate, len(dataset))))),
+            batch_size=candidate,
+            num_workers=max(0, int(num_workers)),
+        )
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        ok = True
+        try:
+            for x, views, target in loader:
+                x, views, target = x.to(device), views.to(device), target.to(device)
+                with torch.autocast("cuda", dtype=torch.float16):
+                    loss = F.cross_entropy(model(x, views), target)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                break
+        except RuntimeError as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            ok = False
+        peak = torch.cuda.max_memory_allocated() / 1e9
+        trials.append({"batch_size": candidate, "peak_gb": round(peak, 2), "ok": ok})
+        del model, optimizer, scaler, loader
+        gc.collect()
+        torch.cuda.empty_cache()
+        if not ok:
+            break
+        best, peak_used = candidate, peak
+        if peak >= budget_gb:
+            break
+        candidate *= 2
+    return {"batch_size": max(best, 1), "peak_gb": round(peak_used, 2), "status": "ok", "trials": trials}
+
+
 class Trainer:
-    def __init__(self, model, dataset, config, artifacts, run, *, resume=False, warm_start=""):
+    def __init__(self, model, dataset, config, artifacts, run, *, resume=False, warm_start="", num_workers=0):
         if resume and warm_start:
             raise ValueError("Warm-start is weights only, not resume; choose one")
         if len(dataset) == 0 or config["batch_size"] < 1 or config["grad_accum"] < 1 or config["epochs"] < 1:
@@ -323,6 +372,7 @@ class Trainer:
         self.model, self.dataset, self.config = model, dataset, copy.deepcopy(config)
         self.artifacts, self.run = artifacts, run
         self.device = next(model.parameters()).device
+        self.num_workers = max(0, int(num_workers))
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"])
         steps = math.ceil(math.ceil(len(dataset) / config["batch_size"]) / config["grad_accum"]) * config["epochs"]
         warm = int(steps * 0.05)
@@ -460,7 +510,8 @@ class Trainer:
                     loader = DataLoader(
                         Subset(self.dataset, self.order[self.cursor :]),
                         batch_size=self.config["batch_size"],
-                        num_workers=0,
+                        num_workers=self.num_workers,
+                        persistent_workers=self.num_workers > 0,
                         generator=torch.Generator().manual_seed(0),
                         pin_memory=self.device.type == "cuda",
                     )
@@ -755,13 +806,16 @@ class SmokeModel(torch.nn.Module):
         return self.head(z)
 
 
-def predict(model, dataset, batch_size):
+def predict(model, dataset, batch_size, num_workers=0):
     device = next(model.parameters()).device
     model.eval()
     logits, labels = [], []
     with torch.no_grad():
         for x, views, y in DataLoader(
-            dataset, batch_size=batch_size, num_workers=0, pin_memory=device.type == "cuda"
+            dataset,
+            batch_size=batch_size,
+            num_workers=max(0, int(num_workers)),
+            pin_memory=device.type == "cuda",
         ):
             with torch.autocast(device.type, dtype=torch.float16, enabled=device.type == "cuda"):
                 output = model(x.to(device, non_blocking=True), views.to(device, non_blocking=True))
@@ -771,16 +825,16 @@ def predict(model, dataset, batch_size):
     return output.softmax(1)[:, 1].numpy(), torch.cat(labels).numpy(), output.numpy()
 
 
-def calibrated_report(model, val, test, batch_size, *, smoke=False, train=None):
+def calibrated_report(model, val, test, batch_size, *, smoke=False, train=None, num_workers=0):
     from scripts import final_model as fm
 
-    _, vy, vl = predict(model, val, batch_size)
+    _, vy, vl = predict(model, val, batch_size, num_workers=num_workers)
     temperature = fm.temperature_scale(vl, vy, max_iter=10 if smoke else 200)
     if not math.isfinite(temperature) or temperature <= 0:
         raise RuntimeError("Validation temperature fit did not produce a finite positive temperature")
     vp = torch.softmax(torch.tensor(vl) / temperature, 1)[:, 1].numpy()
     threshold = fm.tune_threshold(vp, vy)
-    _, ty, tl = predict(model, test, batch_size)
+    _, ty, tl = predict(model, test, batch_size, num_workers=num_workers)
     tp = torch.softmax(torch.tensor(tl) / temperature, 1)[:, 1].numpy()
     n_boot = 20 if smoke else 1000
     result = {
@@ -798,7 +852,7 @@ def calibrated_report(model, val, test, batch_size, *, smoke=False, train=None):
         "test_ci": fm.bootstrap_ci(tp, ty, n_boot=n_boot, threshold=threshold),
     }
     if train is not None:
-        trp, tr_labels, trl = predict(model, train, batch_size)
+        trp, tr_labels, trl = predict(model, train, batch_size, num_workers=num_workers)
         result["train"] = {
             **fm.full_metrics(trp, tr_labels, threshold),
             "loss": F.cross_entropy(torch.tensor(trl) / temperature, torch.tensor(tr_labels)).item(),
