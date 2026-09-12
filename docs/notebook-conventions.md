@@ -323,6 +323,17 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Log **ngắn gọn, không trùng** với W&B (W&B vẫn là nguồn số liệu chính); không in trong vòng lặp micro-batch.
 - Ưu tiên log trong shared helper (`scripts/*.py`) để mọi notebook cùng format; notebook in thêm mốc riêng.
 
+### 3.14 Notebook đối chứng / ablation
+- Mỗi biến thể **train lại từ đầu** trên cùng split/seed/protocol; **không** giữ model đầy đủ rồi chỉ che input
+  lúc test. Bỏ nhánh 3D/2D phải huấn luyện lại với kiến trúc/fusion tương ứng.
+- Spec table nằm trong config (mã, model kwargs: `use_3d`, `n_2d`, `view_indices`, `fusion`, `gate_fixed`) và được
+  ghi vào run config để resume/so sánh chính xác.
+- Cùng epoch budget và cùng `PATIENCE` cho mọi biến thể; chọn best theo val AUC; chạy **≥3 seed** và báo cáo
+  **mean ± std** (kèm per-seed, không chỉ seed đẹp).
+- Mỗi cặp `(spec, seed)` là **một run riêng**, resume-safe; có cell aggregation tổng hợp bảng so sánh
+  (`*_summary.csv/json` + W&B table) và sync Drive.
+- Baseline chính (P) phải được train lại cùng budget nếu protocol khác trước đó.
+
 ## 4. Checklist trước khi giao notebook
 
 - [ ] Đúng thứ tự cell mục 1; config một nguồn duy nhất, có env override.
@@ -340,6 +351,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - [ ] **Sau train chạy X-AI trên best model, log `xai/fusion_table` + giá trị `xai/*` lên W&B (hoặc ghi rõ ngoại lệ).**
 - [ ] Chỉ số log bằng W&B table/scalar; **không vẽ đồ thị metrics** (đồ thị chỉ dùng cho X-AI/ảnh).
 - [ ] Info-theory (nếu có): đa-seed DV/NWJ/InfoNCE có negative-rate (không clamp); surrogate ≥1000 cho MIC; interaction information cho redundancy/synergy; tất cả log bằng table/scalar.
+- [ ] Notebook đối chứng/ablation: mỗi biến thể train lại, cùng budget/patience, ≥3 seed, có bảng mean ± std và mỗi (spec, seed) là run riêng.
 - [ ] **Optional stages (X-AI/info-theory) là cờ trong cùng notebook, không tách/fork notebook; logic ở `scripts/`.**
 - [ ] Mọi artifact (figure/model/CSV/report/X-AI) sync Drive ngay khi sinh ra.
 - [ ] HF download có `HF_TOKEN` + `allow_patterns` chỉ tải phần dùng; real run thiếu token fail sớm.
@@ -362,6 +374,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 | [`3d_glaucoma_multiview_sota_sweep_xai.ipynb`](../notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb) | Cấu trúc sweep đầy đủ: registry backbone, fusion ablation, X-AI, resume-safe, reporting |
 | [`3d_glaucoma_train_3branch_crossgate.ipynb`](../notebooks/3d_glaucoma_train_3branch_crossgate.ipynb) | Notebook train chuẩn 3 nhánh (1×3D ResNeXt + 2×2D MaxViT + CrossGate): 3D chạy **96³** resize on-the-fly, **view 2D chiếu từ raw 200³**; full metrics 3 tập, X-AI, info-theory tùy chọn (`RUN_INFO`), resume, smoke |
 | [`3d_glaucoma_final_2x2d_3d_crossgate.ipynb`](../notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb) | Notebook train chuẩn cho tập **Bilateral 200³** (denoise cache + recovery contract): full metrics 3 tập, X-AI + bảng W&B, warm-start tùy chọn, smoke |
+| [`3d_glaucoma_controls_96.ipynb`](../notebooks/3d_glaucoma_controls_96.ipynb) | Notebook đối chứng 96³: B1–B3 (bỏ nhánh), C1–C2 (fusion), P (baseline); mỗi spec × 3 seed, 20 epoch early stop, bảng mean ± std |
 | [`3d_glaucoma_resolution_96_128_200.ipynb`](../notebooks/3d_glaucoma_resolution_96_128_200.ipynb) | So sánh resolution trên cùng backbone |
 | [`3d_glaucoma_denoise_gpu_compare.ipynb`](../notebooks/3d_glaucoma_denoise_gpu_compare.ipynb) | So sánh phương pháp khử nhiễu + metric ảnh |
 
