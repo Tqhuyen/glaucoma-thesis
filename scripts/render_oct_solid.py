@@ -195,7 +195,7 @@ def main():
     plane_names = ["YZ", "XZ", "XY"]
     axis_labels = [("Y", "Z"), ("X", "Z"), ("Y", "X")]
     for index, (pixels, color) in enumerate(zip(slice_arrays, colors)):
-        section = fig.add_axes((0.79, 0.65 - index * 0.28, 0.18, 0.23))
+        section = fig.add_axes((0.79, 0.65 - index * 0.28, 0.18, 0.21))
         section.imshow(pixels, cmap="gray", vmin=0, vmax=255, interpolation="nearest")
         section.set_title(f"{plane_names[index]} | {'XYZ'[index]} = {positions[index]}", fontsize=11, color=color)
         section.set(

@@ -22,9 +22,17 @@ was chosen for illustration and is not an anatomical layer segmentation.
 The eye-location panel is schematic, not patient-specific registration.
 Drive delivery remains deferred at the user's request.
 
+The colored traces are generated at voxel-center planes (index + 0.5 in the
+cell-grid coordinates), not positioned manually. Matching circles identify
+the same voxel on a visible block face and in its 2D section. The XZ panel
+is displayed with decreasing X from left to right so its left edge matches
+the visible X=max face. Tick labels show this display reversal explicitly.
+All complete slice arrays and anchor intensities are checked against the
+source array; coordinates are recorded in the final metadata JSON.
+
 Reproduce:
 
 ```powershell
-python scripts/render_oct_solid.py --volume "$env:TEMP/gf_vol_cache/raw_2683.npy" --output "figures/oct_sample_2683/solid" --slice-z 75
+python scripts/render_oct_solid.py --volume "$env:TEMP/gf_vol_cache/raw_2683.npy" --output "figures/oct_sample_2683/solid" --slice-x 100 --slice-y 100 --slice-z 75
 python scripts/check_oct_edge.py --volume "$env:TEMP/gf_vol_cache/raw_2683.npy" --output "figures/oct_sample_2683/solid"
 ```
