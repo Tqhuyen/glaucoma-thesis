@@ -19,6 +19,8 @@ def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description="Render cached denoise comparisons at thesis page width.")
     parser.add_argument("--volume", default="2404")
+    parser.add_argument("--methods", default=None, help="Comma-separated cached methods; original is always included")
+    parser.add_argument("--planes", nargs="+", default=None, help="Array-axis slices, e.g. x:60 x:100 z:160")
     parser.add_argument("--raw-cache", type=Path, default=Path(tempfile.gettempdir()) / "gf_vol_cache")
     parser.add_argument("--output-dir", type=Path, default=root / "figures/denoise/thesis")
     parser.add_argument("--drive-sync-dir", type=Path, default=os.environ.get("DRIVE_SYNC_DIR"))
@@ -26,9 +28,18 @@ def main():
     source = root / "figures/denoise"
     meta_path = source / f"denoise_compare_{args.volume}_all_meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    methods = ["original", *meta["methods"]]
-    if len(methods) != 8:
-        raise ValueError("This publication layout expects the original and seven cached denoisers.")
+    selected = args.methods.split(",") if args.methods else list(meta["methods"])
+    if not selected or len(set(selected)) != len(selected) or any(method not in meta["methods"] for method in selected):
+        raise ValueError("Choose distinct method names present in the source metadata")
+    methods = ["original", *selected]
+    planes = meta["planes"]
+    if args.planes:
+        planes = {}
+        for plane in args.planes:
+            name, index = plane.split(":")
+            if name not in ("x", "y", "z") or not 0 <= int(index) < 200:
+                raise ValueError("Planes must be x/y/z with a zero-based slice index in [0, 199]")
+            planes.setdefault(name, {"axis": ("x", "y", "z").index(name), "slices": []})["slices"].append(int(index))
     paths = [args.raw_cache / f"raw_{args.volume}.npy"] + [
         source / "cache" / f"{args.volume}_{method}.npy" for method in methods[1:]
     ]
@@ -44,9 +55,11 @@ def main():
     dz = meta["depth_axis"]
     outputs = []
     records = []
+    nrows = (len(methods) + 1) // 2
+    figure_size = (6.4, 2.2 * nrows + 0.6)
     bundle = args.output_dir / f"denoise_{args.volume}_print.pdf"
     with PdfPages(bundle) as pdf:
-        for name, spec in meta["planes"].items():
+        for name, spec in planes.items():
             axis = spec["axis"]
             remaining = [i for i in range(3) if i != axis]
             for index in spec["slices"]:
@@ -68,8 +81,8 @@ def main():
                     }
                 )
                 for detail in (False, True):
-                    fig, axes = plt.subplots(4, 2, figsize=(6.4, 9.4))
-                    fig.subplots_adjust(left=0.025, right=0.975, top=0.925, bottom=0.04, hspace=0.22, wspace=0.04)
+                    fig, axes = plt.subplots(nrows, 2, figsize=figure_size, squeeze=False)
+                    fig.subplots_adjust(left=0.025, right=0.975, top=0.86, bottom=0.06, hspace=0.28, wspace=0.04)
                     view = "Detail: same 80 x 80 pixel region" if detail else "Full slice: box marks detail region"
                     fig.suptitle(f"Denoising comparison | {name} = {index}\n{view}", fontsize=12, y=0.985)
                     for panel, (ax, image, method) in enumerate(zip(axes.flat, images, methods)):
@@ -83,6 +96,18 @@ def main():
                             )
                         ax.set_title(f"({chr(97 + panel)}) {label_map[method]}", fontsize=11, pad=4)
                         ax.set_axis_off()
+                    for ax in list(axes.flat)[len(methods) :]:
+                        ax.set_axis_off()
+                        ax.text(
+                            0.05,
+                            0.95,
+                            f"Same slice and contrast\nfor all {len(methods)} panels.\n\nROI: x={x0}, y={y0}, {size} x {size}\n"
+                            "Display coordinates (zero-based).\nCrop, not segmentation.\nNo added image smoothing.",
+                            transform=ax.transAxes,
+                            fontsize=9,
+                            va="top",
+                            linespacing=1.3,
+                        )
                     fig.text(
                         0.5,
                         0.012,
@@ -109,8 +134,8 @@ def main():
                     {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths
                 ],
                 "methods": methods,
-                "method_parameters_from_source": meta["methods"],
-                "figure_inches": [6.4, 9.4],
+                "method_parameters_from_source": {method: meta["methods"][method] for method in selected},
+                "figure_inches": list(figure_size),
                 "dpi": 300,
                 "interpolation": "nearest",
                 "planes": records,

@@ -13,6 +13,7 @@
 | [`3d-backbone-sweep.md`](3d-backbone-sweep.md) | Sweep backbone 3D (17 run: ResNeXt3D/VNet/SegResNet/CNN/MONAI/MedicalNet/3DINO) — xếp hạng + cảnh báo collapse |
 | [`final-4branch-design.md`](final-4branch-design.md) | Thiết kế **mô hình 4 nhánh (1×3D + 3×2D)** tổng hợp từ 3 sweep + quy trình huấn luyện chống collapse |
 | [`view-redundancy-analysis.md`](view-redundancy-analysis.md) | Phân tích 3 view en-face có trùng lặp không → khuyến nghị số nhánh 2D (1/2/3) |
+| [`bm3d-cuda-local.md`](bm3d-cuda-local.md) | Chạy BM3D trên CUDA local (VapourSynth + BM3DCUDA R2.15): cài đặt, adapter, tham số, timing pilot |
 | [`model-architecture.md`](model-architecture.md) | Kiến trúc mô hình chính (2×2D MaxViT + 1×3D ResNeXt3D + CrossGate) — sơ đồ + params |
 | [`model-architecture-spec.md`](model-architecture-spec.md) | **Đặc tả chi tiết kiến trúc chính** (shapes, layer, edge list, layout/màu) để đưa vào phần mềm vẽ hình |
 | [`model-architecture-draw-prompt.md`](model-architecture-draw-prompt.md) | **English draw prompt** cho tool vẽ hình (labels, shrinking feature maps, edge list, style guide) |
