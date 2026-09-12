@@ -950,6 +950,48 @@ def finite_json(value):
     return value
 
 
+def check_cuda_runtime(*, smoke, run):
+    metadata = {"torch": str(torch.__version__), "cuda": torch.version.cuda, "status": "synthetic-cpu-skip"}
+    try:
+        if smoke:
+            return metadata
+        metadata["status"] = "checking"
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is unavailable in the assigned worker")
+        metadata["visible_devices"] = torch.cuda.device_count()
+        if metadata["visible_devices"] != 1:
+            raise RuntimeError("Worker must see exactly one assigned GPU")
+        metadata.update(
+            device=torch.cuda.get_device_name(0),
+            capability=list(torch.cuda.get_device_capability(0)),
+            supported_arches=torch.cuda.get_arch_list(),
+            cudnn=torch.backends.cudnn.version(),
+        )
+        expected = next((cap for name, cap in (("P100", [6, 0]), ("T4", [7, 5])) if name in metadata["device"]), None)
+        if expected is None or metadata["capability"] != expected:
+            raise RuntimeError("Assigned device must be a P100 (sm_60) or T4 (sm_75) with matching capability")
+        tiny = torch.ones(4, dtype=torch.float32, device="cuda:0")
+        try:
+            tiny.add_(1)
+            torch.cuda.synchronize("cuda:0")
+        finally:
+            del tiny
+        metadata["status"] = "passed"
+        return metadata
+    except (RuntimeError, OSError, AssertionError) as exc:
+        metadata.update(status="failed", error=str(exc))
+        raise RuntimeError(
+            f"Assigned-worker CUDA compatibility check failed: {exc}. Runtime: {metadata}. "
+            "Select a compatible Kaggle image/PyTorch CUDA build for the assigned GPU. "
+            "P100 requires Pascal sm_60 support, which newer CUDA 13 builds may omit; "
+            "alternatively select T4 with a compatible image. Leave Kaggle's installed Torch untouched; "
+            "no automatic reinstall was attempted. Model construction, pretrained downloads and probing were not started."
+        ) from exc
+    finally:
+        run.summary.update({"runtime/device_check": metadata})
+        run.log({"runtime/phase": "device-check", "runtime/device_check/status": metadata["status"]})
+
+
 def worker(cfg, prepared, tag, *, deadline, stop_path):
     validate_config(cfg)
     configure_runtime(cfg)
@@ -986,11 +1028,10 @@ def worker(cfg, prepared, tag, *, deadline, stop_path):
         )
         runtime_exit = 1
         try:
+            check_cuda_runtime(smoke=cfg["smoke"], run=runtime)
             if cfg["smoke"]:
                 torch.set_num_threads(1)
             else:
-                if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
-                    raise RuntimeError("Worker must see exactly one assigned GPU")
                 torch.backends.cuda.matmul.allow_tf32 = False
                 torch.backends.cudnn.allow_tf32 = False
             device = torch.device("cpu" if cfg["smoke"] else "cuda:0")

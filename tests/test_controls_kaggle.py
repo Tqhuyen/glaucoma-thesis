@@ -134,6 +134,15 @@ def test_plan_and_frozen_defaults(monkeypatch):
     assert cfg["seeds"] == [42, 43, 44]
     assert cfg["effective_batch"] == 16
     assert cfg["store_res"] == 200 and cfg["res3d"] == 96 and cfg["res2d"] == 224
+    assert [(s["code"], s["use_3d"], s["n_2d"], s["view_indices"], s["fusion"], s["gate_fixed"]) for s in kg.SPECS] == [
+        ("P", True, 2, [0, 1], "crossgate", False),
+        ("B1", True, 1, [0], "crossgate", False),
+        ("B2", True, 1, [1], "crossgate", False),
+        ("B3", False, 2, [0, 1], "concat", False),
+        ("C1", True, 2, [0, 1], "concat", False),
+        ("C2", True, 2, [0, 1], "crossgate", True),
+        ("B4", True, 2, [0, 1], "crossgate", False),
+    ]
     assert kg.jobs({**cfg, "run_target": "B4_s44"})[0][2] == "B4_s44"
     with pytest.raises(ValueError, match="RUN_TARGET"):
         kg.jobs({**cfg, "run_target": "B4"})
@@ -151,6 +160,110 @@ def test_gpu_detection_and_env(monkeypatch):
     assert all(env["WANDB_API_KEY"] == "not-persisted" for env in envs)
     with pytest.raises(RuntimeError, match="Unvalidated"):
         kg.detect_gpus(listing="0, A100, 81920")
+
+
+@pytest.fixture
+def cuda_runtime(monkeypatch):
+    calls, logs, finishes = [], [], []
+    run = SimpleNamespace(summary={}, config={}, log=logs.append, finish=lambda **kwargs: finishes.append(kwargs))
+    monkeypatch.setattr(torch.version, "cuda", "12.6")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "Tesla T4")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (7, 5))
+    monkeypatch.setattr(torch.cuda, "get_arch_list", lambda: ["sm_75", "sm_80", "compute_90"])
+    monkeypatch.setattr(torch.backends.cudnn, "version", lambda: 90500)
+
+    class TinyTensor:
+        def add_(self, value):
+            assert value == 1
+            calls.append("add")
+            return self
+
+    def ones(size, *, dtype, device):
+        assert size == 4 and dtype == torch.float32 and device == "cuda:0"
+        calls.append("ones")
+        return TinyTensor()
+
+    def synchronize(device):
+        assert device == "cuda:0"
+        calls.append("synchronize")
+
+    monkeypatch.setattr(torch, "ones", ones)
+    monkeypatch.setattr(torch.cuda, "synchronize", synchronize)
+    return SimpleNamespace(run=run, calls=calls, logs=logs, finishes=finishes)
+
+
+def test_cuda_runtime_supported_t4(cuda_runtime):
+    metadata = kg.check_cuda_runtime(smoke=False, run=cuda_runtime.run)
+    assert cuda_runtime.calls == ["ones", "add", "synchronize"]
+    assert metadata["status"] == "passed" and metadata["device"] == "Tesla T4"
+    assert metadata["capability"] == [7, 5] and metadata["cuda"] == "12.6"
+    assert metadata["supported_arches"] == ["sm_75", "sm_80", "compute_90"]
+    assert metadata["cudnn"] == 90500
+    assert cuda_runtime.run.summary["runtime/device_check"] == metadata
+    assert cuda_runtime.run.config == {}
+
+
+def test_p100_cuda13_fails_before_model_download_or_probe(cfg, cuda_runtime, monkeypatch):
+    data = prepared(cfg)
+    cfg["smoke"] = False
+    monkeypatch.setattr(kg, "validate_config", lambda *a: None)
+    monkeypatch.setattr(kg, "load_credentials", lambda **kwargs: None)
+    monkeypatch.setattr(kg.ft, "init_wandb", lambda *a, **kwargs: cuda_runtime.run)
+    monkeypatch.setattr(torch.version, "cuda", "13.0")
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "Tesla P100-PCIE-16GB")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (6, 0))
+
+    def no_kernel(device):
+        cuda_runtime.calls.append("synchronize")
+        raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
+
+    monkeypatch.setattr(torch.cuda, "synchronize", no_kernel)
+    monkeypatch.setattr(kg, "make_model", lambda *a, **kwargs: pytest.fail("Model/pretrained download before check"))
+    monkeypatch.setattr(kg, "probe_batch", lambda *a, **kwargs: pytest.fail("Probe before check"))
+    with pytest.raises(RuntimeError, match="no kernel image") as error:
+        kg.worker(cfg, data, "P_s42", deadline=float("inf"), stop_path=str(Path(cfg["output_root"]) / "stop"))
+    assert "compatible Kaggle image" in str(error.value) and "sm_60" in str(error.value)
+    assert "no automatic reinstall" in str(error.value)
+    assert cuda_runtime.calls == ["ones", "add", "synchronize"]
+    metadata = cuda_runtime.run.summary["runtime/device_check"]
+    assert metadata["status"] == "failed" and metadata["capability"] == [6, 0] and metadata["cuda"] == "13.0"
+    assert cuda_runtime.finishes == [{"exit_code": 1}]
+    assert not (Path(cfg["output_root"]) / cfg["group"] / "P_s42" / "run_identity.pt").exists()
+
+
+@pytest.mark.parametrize("problem", ["unavailable", "multiple", "wrong-hardware"])
+def test_cuda_runtime_rejects_invalid_assignment(cuda_runtime, monkeypatch, problem):
+    if problem == "unavailable":
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    elif problem == "multiple":
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    else:
+        monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "H100")
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (9, 0))
+    with pytest.raises(RuntimeError, match="compatibility check failed"):
+        kg.check_cuda_runtime(smoke=False, run=cuda_runtime.run)
+    assert not cuda_runtime.calls
+    assert cuda_runtime.run.summary["runtime/device_check"]["status"] == "failed"
+
+
+def test_cuda_runtime_cpu_smoke_never_touches_cuda(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("CPU smoke must not query or initialize CUDA")
+
+    for name in (
+        "is_available",
+        "device_count",
+        "get_device_name",
+        "get_device_capability",
+        "get_arch_list",
+        "synchronize",
+    ):
+        monkeypatch.setattr(torch.cuda, name, forbidden)
+    monkeypatch.setattr(torch, "ones", forbidden)
+    run = SimpleNamespace(summary={}, log=lambda values: None)
+    assert kg.check_cuda_runtime(smoke=True, run=run)["status"] == "synthetic-cpu-skip"
 
 
 def test_readonly_views_identity_and_augmentation(cfg, monkeypatch):
