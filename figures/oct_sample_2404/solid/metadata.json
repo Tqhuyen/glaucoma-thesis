@@ -1,0 +1,61 @@
+{
+  "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2404.npy",
+  "source_sha256": "08adf96bad18e6b6335d90ae11f165d5a0437dd7511e0f7813948d4be15a7a75",
+  "source_shape": [
+    200,
+    200,
+    200
+  ],
+  "display_axis_source_order_xyz": [
+    0,
+    2,
+    1
+  ],
+  "depth_axis_assumed": 1,
+  "spacing": [
+    1,
+    1,
+    1
+  ],
+  "units": "voxel",
+  "opacity": 1,
+  "representation": "Opaque boundary of voxel cells, original intensity per cell",
+  "clim": [
+    0,
+    255
+  ],
+  "smoothing": null,
+  "downsampling": null,
+  "lighting": false,
+  "camera": {
+    "position": [
+      620.0,
+      -500.0,
+      -260.0
+    ],
+    "focal_point": [
+      100.0,
+      100.0,
+      100.0
+    ],
+    "view_up": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "parallel_scale": 172.0
+  },
+  "slice_indices_xyz": [
+    100,
+    100,
+    33
+  ],
+  "slice_plane_world_coordinates": [
+    100.5,
+    100.5,
+    33.5
+  ],
+  "eye_location": "Illustrative optic-nerve-head region; no patient-specific registration",
+  "pyvista_version": "0.49.0",
+  "drive_sync": "deferred by user; local only"
+}

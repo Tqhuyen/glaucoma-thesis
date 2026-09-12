@@ -1,0 +1,47 @@
+{
+  "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2404.npy",
+  "source_sha256": "08adf96bad18e6b6335d90ae11f165d5a0437dd7511e0f7813948d4be15a7a75",
+  "shape": [
+    200,
+    200,
+    200
+  ],
+  "dtype": "uint8",
+  "depth_axis_assumed": 1,
+  "description": "raw_2404: (200, 200, 200), uint8. Assumed depth: source axis 1.",
+  "atlas_layout": "10 columns, row-major, slice 0 at top left; no padding between slices",
+  "display_axis_source_order_xyz": [
+    0,
+    2,
+    1
+  ],
+  "sequence_source_indices": {
+    "0": [
+      33,
+      66,
+      99,
+      132,
+      165
+    ],
+    "2": [
+      33,
+      66,
+      99,
+      132,
+      165
+    ],
+    "1": [
+      33,
+      66,
+      99,
+      132,
+      165
+    ]
+  },
+  "overview_slice_indices_xyz": [
+    100,
+    100,
+    33
+  ],
+  "drive_sync": "pending"
+}
