@@ -2,6 +2,7 @@
 
 | Tài liệu | Nội dung |
 |---|---|
+| [`so-sanh-raw200-bilateral200-raw96.md`](so-sanh-raw200-bilateral200-raw96.md) | Phân tích luận văn bằng tiếng Việt: so sánh Raw 200, Bilateral 200 và Raw 96 từ số liệu cung cấp; đánh đổi Sensitivity/Specificity và giới hạn diễn giải |
 | [`thesis-results-discussion.md`](thesis-results-discussion.md) | **Bản tổng hợp kết quả, thảo luận và giới hạn:** phân biệt khảo sát khử nhiễu, phân loại raw và fine-tune Bilateral chưa hoàn thành |
 | [`final-model-raw-results.md`](final-model-raw-results.md) | Kết quả raw mới nhất: số liệu gốc, validation/test và ma trận nhầm lẫn |
 | [`final-model-raw-vs-single-branch.md`](final-model-raw-vs-single-branch.md) | So sánh tham khảo với 3D/2D đơn nhánh và các giới hạn khi diễn giải |
@@ -22,6 +23,7 @@
 | [`multiview-model.md`](multiview-model.md) | Kiến trúc mô hình đa luồng 2D-projection + 3D (Group A) |
 | [`train-platform-method.md`](train-platform-method.md) | So sánh nền tảng huấn luyện (local/Colab/vast.ai) & phương pháp tối ưu chi phí-thời gian |
 | [`swinunetr-encoder-notes.md`](swinunetr-encoder-notes.md) | Ghi chú encoder Swin-UNETR |
-| [`notebook-conventions.md`](notebook-conventions.md) | Cấu trúc cell & quy tắc bắt buộc khi tạo notebook train/sweep (chuẩn hoá từ sweep 2D–3D fusion) |
+| [`notebook-conventions.md`](notebook-conventions.md) | Bản tiếng Việt dành cho người đọc: cấu trúc cell & quy tắc notebook train/sweep |
+| [`notebook-conventions.en.md`](notebook-conventions.en.md) | English canonical notebook conventions; mandatory reading for agents |
 
 Hình minh hoạ nằm ở thư mục gốc `figures/` (khi tài liệu trong `docs/` dùng đường dẫn `../figures/...`).
