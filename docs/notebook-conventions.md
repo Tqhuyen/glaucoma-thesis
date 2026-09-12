@@ -151,6 +151,9 @@ Nhịp log (train từng bước, val/test từng epoch):
 - **Thời gian epoch**: mỗi epoch log `train/epoch_seconds` lên W&B và in `[train] epoch N done in Xs`; dùng để đo
   `sec/epoch`, ước lượng budget và so sánh tốc độ giữa các cấu hình (không đưa wall-clock vào `history` để giữ
   tính tái lập khi resume).
+- **In val/test mỗi epoch**: in ra stdout dòng `[val ] epoch N: ...` và `[test ] epoch N: ...` với đầy đủ metric
+  chính (loss, acc, balanced_acc, precision, recall, specificity, npv, f1, mcc, kappa, youden, auc_roc, auc_pr,
+  ece, logloss, brier) — **không chỉ log W&B**, để theo dõi trực tiếp khi train.
 - AUC/PR-AUC trên cửa sổ nhỏ có thể NaN khi cửa sổ chỉ có một lớp — đọc xu hướng theo epoch, đừng chọn theo bước.
 
 ### 2.9 Probe + train loop
@@ -317,9 +320,9 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
   `[model]`, `[batch]`, `[wandb]`, `[train]`, `[eval]`, `[checkpoint]`, `[report]`, `[xai]`, `[info]`, `[sync]`.
 - Log các mốc: tải/cache data (số pattern, cache hit hay tải mới), build denoise/views (cache hit hay tạo mới, số
   mẫu), dataset (n + số positive mỗi split, resolution), model (load từ path hay khởi tạo mới, params), batch probe
-  (BS/peak GB/budget), train start (device, epochs, effective batch, workers), mỗi epoch (history +
-  `train/epoch_seconds` + `[train] epoch N done in Xs`), checkpoint (file đã lưu), calibrated report
-  (temperature/threshold + test/val AUC/F1), X-AI/info bắt đầu–kết thúc, sync Drive + finish.
+  (BS/peak GB/budget), train start (device, epochs, effective batch, workers), mỗi epoch (in `[val ]` và `[test ]`
+  đầy đủ metric chính, history, `train/epoch_seconds`, `[train] epoch N done in Xs`), checkpoint (file đã lưu),
+  calibrated report (temperature/threshold + test/val AUC/F1), X-AI/info bắt đầu–kết thúc, sync Drive + finish.
 - Log **ngắn gọn, không trùng** với W&B (W&B vẫn là nguồn số liệu chính); không in trong vòng lặp micro-batch.
 - Ưu tiên log trong shared helper (`scripts/*.py`) để mọi notebook cùng format; notebook in thêm mốc riêng.
 
@@ -343,6 +346,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - [ ] Kiểm tra notebook thực tế có cell riêng + markdown heading cho D1–D4/T1–T3/E1–E6 (không gộp data/train/eval), không chỉ ghi trong tài liệu.
 - [ ] Mỗi bước in log trạng thái có tiền tố (`[data]`/`[model]`/`[train]`/`[eval]`/`[xai]`/...) để theo dõi và debug.
 - [ ] Mỗi epoch log thời gian hoàn thành (`train/epoch_seconds` + in `[train] epoch N done in Xs`) để đo `sec/epoch`.
+- [ ] Mỗi epoch in rõ `[val ]` và `[test ]` (metric chính) ra stdout, không chỉ log W&B.
 - [ ] Model load từ path trước (`WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi chưa có weights.
 - [ ] `*_SMOKE=1` chạy hết cell trên CPU, synthetic, không download — pass.
 - [ ] W&B init + log live đúng prefix + figures as `wandb.Image` + `summary.update` + `finish`.
