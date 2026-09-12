@@ -1,5 +1,18 @@
 # Cấu trúc & quy tắc chung khi tạo notebook train model
 
+**Đối tượng:** bản tiếng Việt dành cho người đọc. Agent phải luôn đọc và dùng
+[`notebook-conventions.en.md`](notebook-conventions.en.md) làm bản quy chuẩn tiếng Anh trước khi tạo,
+sửa hoặc review notebook. Khi sửa quy tắc, cập nhật cả hai bản để tránh lệch nội dung.
+Các quy tắc này vẫn chịu sự chi phối của chỉ dẫn có mức ưu tiên cao hơn và phạm vi thí nghiệm đã chốt.
+Tài liệu không cho phép tự bắt đầu hoặc gia hạn train, thêm sweep/seed/ablation, bật giai đoạn tùy chọn,
+upload dữ liệu hoặc push thay đổi ngoài phạm vi người dùng đã cho phép. Quy trình và checklist bên dưới
+chỉ áp dụng trong phạm vi đó; ghi rõ ngoại lệ về phạm vi thay vì âm thầm mở rộng thí nghiệm.
+
+**Lưu ý sau rà soát:** test mỗi epoch chỉ để theo dõi, không chọn model; báo cáo cuối dùng checkpoint tốt nhất
+theo validation. Không tạo đồ thị metrics mới; hình X-AI/ảnh và artifact có sẵn vẫn phải sync Drive.
+Comment chia nhóm config là ngoại lệ bắt buộc của quy tắc không thêm comment.
+Cache view dùng lại qua các `RES3D`, nhưng phải khớp nguồn, phép chiếu và `RES2D`.
+
 Tài liệu này chuẩn hoá **cấu trúc cell** và **quy tắc bắt buộc** khi tạo notebook train/sweep/nghiên cứu
 mô hình trong repo. Nguồn tham chiếu chính là notebook sweep 2D–3D fusion
 [`notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb`](../notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb),
@@ -9,7 +22,7 @@ mô hình trong repo. Nguồn tham chiếu chính là notebook sweep 2D–3D fus
 ## 1. Cấu trúc cell chuẩn
 
 Thứ tự dưới đây lấy từ sweep notebook; notebook train đơn lẻ có thể bỏ các phần sweep/X-AI nhưng
-**không được bỏ** phần 2–4, 9, 11–12.
+**không được bỏ** phần 2–4, 9, 12; phần 11 bắt buộc trừ khi preset/phạm vi đã ghi rõ ngoại lệ X-AI.
 
 **Nguyên tắc chia cell:** mỗi cell làm **một việc** hoặc một nhóm việc cùng loại; tách cả **data**, **train**,
 **eval**, **info/X-AI** và reporting — không chỉ tách riêng phần info. Giữ cell ngắn, ít side effect chéo, biến
@@ -27,7 +40,7 @@ dài (> ~80 dòng) phải tách theo bước và đặt markdown heading rõ rà
 | 7 | Fusion + model | Các phép fusion (concat/add/mul/attn/crossgate/mamba/film) + model đa nhánh | Cell 19–20 |
 | 8 | Metrics | Bộ metric lâm sàng đầy đủ + calibration + threshold + bootstrap CI (chi tiết mục 2.8) | Cell 21–23 |
 | 9 | Probe + train loop | `probe()` kiểm tra 1 forward/backward, params, VRAM; `train_one()` resume-safe, lưu JSON per-run | Cell 24–27 |
-| 10 | Sweep driver (nếu sweep) | Tier/spec, mỗi run xong ghi `results.json` (local + Drive) ngay, figure per-run xuất ngay | Cell 28–31 |
+| 10 | Sweep driver (nếu sweep) | Tier/spec, mỗi run xong ghi `results.json` (local + Drive) ngay, xuất ngay hình X-AI/ảnh per-run, không xuất đồ thị metrics | Cell 28–31 |
 | 11 | X-AI (nếu có) | Grad-CAM 3D/2D, occlusion, integrated gradients, branch importance, LIME; lưu PNG + markdown | Cell 32–38 |
 | 11b | Phân tích tùy chọn (nếu có) | Info-theory/embedding analysis chạy **trong cùng notebook** qua cờ `RUN_INFO`; logic ở `scripts/information_theory.py` | `3d_glaucoma_train_3branch_crossgate.ipynb` |
 | 12 | Chạy + reporting | Chạy sweep/train, render bảng CSV, W&B table/scalar, markdown report, **Drive sync + `run.finish()`** | Cell 39–49 |
@@ -39,20 +52,21 @@ dài (> ~80 dòng) phải tách theo bước và đặt markdown heading rõ rà
 |---|---|---|
 | Data | D1 tải dữ liệu | HF auth (`HF_TOKEN`) + `allow_patterns`, chỉ tải split/pattern dùng đến |
 | | D2 build/denoise | build storage ở `STORE_RES` (idempotent) hoặc khối denoise (partial + completion marker) |
-| | D3 view cache | chiếu en-face + depth-axis, cache một lần per split, identity theo source/res |
+| | D3 view cache | chiếu en-face + depth-axis, cache một lần per split, identity theo nguồn/resolution/phép chiếu |
 | | D4 dataset/loader | memmap per-sample, augmentation deterministic, smoke synthetic; loader lazy/cache |
 | Train | T1 model | build model **hoặc load weights từ path trước** (`ft.load_weights`), chỉ tạo mới khi chưa có |
 | | T2 trainer | `Trainer` + optimizer/scheduler/AMP, probe batch size theo VRAM (`ft.find_batch_size`) |
 | | T3 fit | vòng `fit()` + callback eval (val/test định nghĩa ở cell riêng) |
 | Eval | E1 val callback | full metrics trên val mỗi epoch |
-| | E2 test callback | full metrics trên test mỗi epoch |
-| | E3 calibrated report | temperature + threshold fit trên val; calibrated `train/val/test` + bootstrap CI |
+| | E2 test callback | full metrics trên test mỗi epoch chỉ để theo dõi, không dùng để lựa chọn |
+| | E3 calibrated report | temperature + threshold fit trên val; calibrated `train/val/test` + bootstrap CI từ checkpoint tốt nhất theo validation |
 | | E4 log bảng | `log_report` + history table + scalar summary (không vẽ đồ thị metrics) |
 | | E5 X-AI | heatmap PNG + `xai/fusion_table` + `xai/*` (khi `RUN_XAI`) |
 | | E6 info | 7 cell như mục 2.11b (khi `RUN_INFO`) |
 
 Có thể gộp 2–3 cell nhỏ nếu rất ngắn, nhưng **không được gộp data/train/eval chung một cell**. Áp dụng cho
-notebook mới và mỗi lần sửa notebook; notebook cũ refactor dần khi có dịp.
+notebook mới và mỗi lần sửa notebook; notebook cũ refactor dần khi có dịp. Giữ từng bước dễ nhận biết
+bằng markdown heading như yêu cầu ở mục 3.12.
 
 ## 2. Chi tiết từng mục
 
@@ -70,7 +84,8 @@ import core script; `DEVICE`; seed; AMP dtype (bf16 nếu có, ngược lại fp
 Một nguồn chân lý duy nhất (`CFG`/hằng số): data paths, `STORE_RES` (config-driven, ví dụ 200/128/96 — không
 hardcode 200), `MODEL_RES3D`/`RES2D`, epochs, batch_size, grad_accum, lr, weight_decay, patience, `log_every`,
 `SAVE_DIR`/`DRIVE_DIR`/`RUN_GROUP`, spec/tier, cờ `RUN_XAI`, env override. Validate sớm (fail fast) trước khi
-build data/model; đổi `RUN_GROUP` khi đổi cấu hình train.
+build data/model; đổi `RUN_GROUP` khi đổi cấu hình train, trừ quy trình gia hạn epoch được hỗ trợ rõ
+ở mục 2.9.
 
 **Chia nhóm tham số trong cell config bằng dòng `#` (bắt buộc).** Cell config phải chia thành các nhóm rõ ràng,
 mỗi nhóm mở đầu bằng một dòng comment `#` mô tả **mục đích** và **mức độ được phép sửa**, để người đọc biết
@@ -110,7 +125,9 @@ WARM_START_WEIGHTS = ...
 - **Chỉ tải phần dùng đến**: dùng `allow_patterns` (hoặc tải từng file) cho đúng split/loại file cần; không
   `snapshot_download` cả repo.
 - **Tái sử dụng & cache**: build storage idempotent (reuse qua nhiều notebook/run), ghi `manifest.json`; cache view
-  en-face (`aip_full`, `slab_aip`, `slab_mip`) + depth-axis một lần per split.
+  en-face (`aip_full`, `slab_aip`, `slab_mip`) + depth-axis một lần per split. Dùng lại cache view qua các
+  `RES3D` phải khớp `RES2D`, identity nguồn (gồm split/resolution storage/preprocessing) và identity phép chiếu
+  (phương pháp, tham số, implementation). Không dùng lại cache view không tương thích.
 - **Dữ liệu đã xử lý (khử nhiễu, view, augmentation nặng)**: xem có nên upload lên HF dataset repo (versioned theo
   method + params + implementation hash) để lần sau khỏi tính lại; chỉ upload khi thực sự tiết kiệm thời gian và
   được người dùng đồng ý, kèm identity để tái lập. Việc rẻ/thay đổi liên tục thì giữ local/Drive, không upload.
@@ -142,12 +159,16 @@ Nhịp log (train từng bước, val/test từng epoch):
 - **Train mỗi optimizer step** trên cửa sổ grad-accum: `train/<metric>` cho toàn bộ bộ metric + `train/loss`,
   `train/acc` (running epoch), `train/lr`, `train/epoch`, `progress/step`.
 - **Val mỗi epoch**: `val/<metric>` cho toàn bộ bộ metric; dùng val AUC/PR-AUC để chọn best + early stop.
-- **Test mỗi epoch**: `test/<metric>` + `test/epoch` với cùng bộ metric.
-- **Chốt cuối** (best state): `calibrated_report` fit temperature + threshold (Youden-J) trên val rồi tính
+- **Test mỗi epoch**: `test/<metric>` + `test/epoch` với cùng bộ metric, chỉ để theo dõi. Không dùng test để chọn
+  checkpoint, hyperparameter, threshold, calibration hoặc quyết định dừng.
+- **Chốt cuối** (best state theo validation): `calibrated_report` fit temperature + threshold (Youden-J) trên val rồi tính
   calibrated `train`/`val`/`test` + bootstrap CI; `ft.log_report` ghi bảng so sánh `report/split_table` và summary
-  `train|val|test/<metric>` (+ `_lo`/`_hi` cho CI).
+  `train|val|test/<metric>` (+ `_lo`/`_hi` cho CI). Báo cáo test held-out cuối phải dùng checkpoint tốt nhất theo
+  validation, không dùng checkpoint được chọn từ việc theo dõi test.
 - **Chỉ số không vẽ đồ thị**: log bằng W&B Table/số (`report/split_table`, `report/history_table`, `report/*_table`)
-  và summary; không tạo PNG cho metrics (ROC/PR/calibration/confusion/history). Đồ thị chỉ dành cho X-AI/ảnh.
+  và summary; không tạo PNG hoặc hình khác cho metrics (ROC/PR/calibration/confusion/history). Hình chỉ dành
+  cho X-AI/ảnh. Các chỗ nói đến tạo figure khác trong tài liệu cũng mang nghĩa này; artifact có sẵn, kể cả
+  đồ thị metrics cũ, vẫn phải sync Drive.
 - **Thời gian epoch**: mỗi epoch log `train/epoch_seconds` lên W&B và in `[train] epoch N done in Xs`; dùng để đo
   `sec/epoch`, ước lượng budget và so sánh tốc độ giữa các cấu hình (không đưa wall-clock vào `history` để giữ
   tính tái lập khi resume).
@@ -159,17 +180,18 @@ Nhịp log (train từng bước, val/test từng epoch):
 ### 2.9 Probe + train loop
 `probe()` chạy 1 forward/backward (params, peak VRAM, fallback batch 1 khi OOM). Train: AdamW + cosine + warmup +
 AMP + grad-accum + grad-clip + early stop; lr theo effective batch; best theo val AUC; checkpoint atomic; `history`
-lưu đầy đủ `val`/`test` metrics mỗi epoch để vẽ và đối chiếu sau này.
+lưu đầy đủ `val`/`test` metrics mỗi epoch để lập bảng và đối chiếu sau này (không vẽ đồ thị metrics).
 - **Train thêm epoch**: đặt `RESUME=True` + `EXTEND_EPOCHS=N` rồi chạy lại cell train; hệ thống cộng N epoch vào
   target đã lưu (config chỉ được phép khác `epochs`), cập nhật identity/`last.pt`, mở lại `completed.pt` (nếu có),
   reset patience và LR chạy theo cosine của tổng epoch mới. Không cần tạo `RUN_GROUP` mới.
+  Đây là mô tả cơ chế, không phải sự cho phép gia hạn thí nghiệm.
 
 ### 2.10 Sweep driver (nếu sweep)
 Mỗi spec override `res3d`/`res2d`/`batch_size`/`epochs`; mỗi run xong ghi ngay `results.json` (local + Drive) và
-figure per-run; interrupt giữ các run đã xong; chọn tier qua env (`*_TIER_*`).
+hình X-AI/ảnh per-run, không xuất đồ thị metrics; interrupt giữ các run đã xong; chọn tier qua env (`*_TIER_*`).
 
 ### 2.11 X-AI (chạy sau khi train xong)
-Trên best model + mẫu test cân bằng lớp:
+Trên model tốt nhất theo validation + mẫu test cân bằng lớp:
 - **Grad-CAM 3D** (conv cuối/patch-embed) và **Grad-CAM 2D** từng view.
 - **Occlusion sensitivity** (3D) và **integrated gradients** (2D view, tùy chọn 3D 64³).
 - **Fusion attention** + **branch drop** (leave-one-branch-out) trả lời nhánh nào quyết định.
@@ -216,15 +238,17 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - `load_env_file()` (hoặc Colab Secret `WANDB_API_KEY`) trước `wandb.init()`; project `glaucoma-thesis`.
 - Helper `init_wandb(run_name, config)` idempotent (`WANDB_RUN is None`), gọi **trước khi train**.
 - Log **live** đúng prefix: `train/...` cho train, `val/...` cho val, `test/...` cho test; không trộn history.
-- Log figure bằng `wandb.Image`; kết thúc bằng `run.summary.update(...)` + `run.finish(exit_code=...)`.
+- Log hình X-AI/ảnh bằng `wandb.Image`; kết thúc bằng `run.summary.update(...)` + `run.finish(exit_code=...)`.
 - Không bao giờ tắt/bỏ wandb để "tiết kiệm thời gian". Chỉ smoke nội bộ được phép `mode="offline"`.
 
 ### 3.2 Drive — mọi artifact đều phải lên Drive
 - Mount Drive có guard (`os.path.ismount`) để chạy headless không lỗi.
 - Root: `/content/drive/MyDrive/MasterBKDN/Thesis/<experiment>[_figures]`; giữ đúng path các notebook cũ
   (`sota_200`, `multiview`, `denoise_sweep`, `3dino_ft`, `final_2x2d_3d_crossgate`, …).
-- Figure/ROC/PR/calibration/confusion/history, CSV/JSON/report, checkpoint: copy **ngay khi sinh ra**
+- Hình X-AI/ảnh, bảng metrics/history, CSV/JSON/report, checkpoint: copy **ngay khi sinh ra**
   (không đợi cuối run) để interrupt vẫn giữ kết quả.
+- Artifact có sẵn, kể cả đồ thị ROC/PR/calibration/confusion/history cũ, vẫn phải sync;
+  điều này không cho phép tạo đồ thị metrics mới (mục 2.8).
 - "Chỉ lưu local hoặc git" là **chưa xong**.
 
 ### 3.3 Dữ liệu
@@ -235,7 +259,10 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Cache/tái sử dụng dữ liệu đã xử lý; quyết định có nên upload lên HF (versioned, kèm identity) khi xử lý đắt và
   sẽ dùng lại; chỉ upload khi được yêu cầu/đồng ý.
 - `data/` bị gitignore — không commit/push dữ liệu vào git.
-- 2D view (aip/slab) chiếu từ khối storage và cache một lần per split (cache dùng được cho mọi `RES3D`/`RES2D`).
+- 2D view (aip/slab) chiếu từ khối storage và cache một lần per split. Chỉ dùng lại qua các `RES3D` khi khớp
+  `RES2D`, identity nguồn (split/resolution storage/preprocessing) và identity phép chiếu
+  (phương pháp/tham số/implementation). `RES2D` khác cần cache tương ứng; chỉ đổi `RES3D` thì không cần tính lại
+  các view 2D vốn không thay đổi.
 
 ### 3.4 Resolution naming (bẫy đã từng gặp)
 - Đặt tên **khác nhau** cho storage và model input: `STORE_RES` (200/128/96/…), `MODEL_RES3D`/`RES3D`, `RES2D`.
@@ -250,7 +277,9 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 
 ### 3.6 Chọn checkpoint & metric
 - Chọn best theo **val AUC/PR-AUC**, không bao giờ theo test.
-- Test chỉ chấm ở epoch tốt nhất; threshold chọn bằng Youden-J trên val; temperature scaling fit trên val.
+- Cho phép test mỗi epoch để theo dõi theo mục 2.8; không dùng test để chọn checkpoint/model/hyperparameter,
+  dừng sớm, chọn threshold hoặc calibration. Báo cáo test held-out cuối dùng checkpoint tốt nhất theo validation;
+  threshold Youden-J và temperature scaling chỉ fit trên val.
 - Bộ metric tối thiểu: acc, balanced acc, precision/PPV, recall/sensitivity, specificity, NPV, F1, MCC,
   AUC-ROC, PR-AUC, ECE (+ bootstrap CI); metric thiếu ghi `—`.
 
@@ -260,11 +289,13 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - **Gia hạn train**: `RESUME=True` + `EXTEND_EPOCHS=N` (mặc định 0) để train thêm N epoch trên cùng run; `epochs`
   là trường duy nhất được phép khác so với config đã lưu; `completed.pt` được mở lại, patience reset, LR đi theo
   cosine của tổng epoch mới. Chạy lại cell train là đủ, không tạo run mới.
+  Chỉ gia hạn trong phạm vi thí nghiệm đã được cho phép rõ ràng.
 - Trước khi đốt GPU: `*_SMOKE=1` chạy CPU với dữ liệu synthetic nhỏ, **không download**; toàn bộ cell
   phải pass. Với pipeline đầy đủ, `make sanity` phải overfit 10 mẫu trước khi nghi ngờ dữ liệu.
 
 ### 3.8 Code style & kỹ thuật
-- Line length 120; `ruff`; không thêm comment khi không được yêu cầu; theo pattern registry/config-driven.
+- Line length 120; `ruff`; không thêm comment khi không được yêu cầu, trừ comment chia nhóm config bắt buộc
+  ở mục 2.3; theo pattern registry/config-driven.
 - Không dùng `vols[:,0]` trên memmap 5D (load 26 GB) — index `vols[i]` rồi squeeze per sample.
 - Windows: `num_workers=0` (mmap + multiprocessing dễ segfault).
 - Augmentation per sample phải deterministic theo `(seed, epoch, index)`.
@@ -274,6 +305,7 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Env override cho mọi chế độ: `*_SMOKE`, `*_SWEEP`, `*_XAI`, `*_TIER_*`, `*_RESUME`.
 - Guard `IN_COLAB`/`SMOKE` cho clone/pip/mount; token HF/W&B lấy từ `.env` hoặc Colab Secrets.
 - Khi sửa xong notebook/config: nhắc người dùng **restart opencode** nếu đổi config, và push repo để Colab clone được.
+  Lời nhắc này không cho phép agent push khi chưa có yêu cầu rõ ràng.
 
 ### 3.10 Hiệu năng & tối ưu tốc độ (mặc định)
 - **Đo trước, tối ưu sau**: dùng `probe()` (params, peak VRAM) + `sec/epoch`; chỉ tối ưu hot path thực sự chậm.
@@ -295,7 +327,8 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - **num_workers**: Linux/Colab dùng >0 (dataset augment per-sample nên kết quả không đổi), Windows để 0.
 - **Phân tích nặng** (MINE/surrogate/probe/IB, X-AI): giới hạn subset/steps/PCA-dim; cache embedding thay vì
   forward lại; log bảng/giá trị thay vì lưu tensor lớn.
-- **Không tính lại cái đã có**: tái sử dụng cache (local/Drive) và cân nhắc upload HF cho preprocessing đắt.
+- **Không tính lại cái đã có**: tái sử dụng cache (local/Drive) và cân nhắc upload HF cho preprocessing đắt,
+  với điều kiện được đồng ý.
 
 ### 3.11 Một notebook chuẩn cho mỗi kiến trúc
 - Mỗi kiến trúc/preset chỉ có **một notebook train chuẩn**; các giai đoạn tùy chọn (X-AI, information theory,
@@ -310,7 +343,8 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
 - Không gộp data + train + eval vào cùng một cell; định nghĩa callback eval ở cell riêng thay vì nhét vào cell train.
 - **Bắt buộc thấy rõ trong notebook**: D1–D4, T1–T3, E1–E6 phải là **cell riêng có markdown heading** (ví dụ
   `### D1 - Download`, `### T1 - Model`, `### E1/E2 - Val/test callbacks`, `### T3 - Training loop`), không chỉ liệt
-  kê trong tài liệu; data/train/eval gộp chung một cell là **chưa đạt**.
+  kê trong tài liệu. Áp dụng ngoại lệ gộp cell ngắn ở mục 1.1 trong cùng một thành phần, vẫn giữ heading rõ
+  cho từng bước; E5/E6 tùy chọn theo cờ giai đoạn tương ứng. Data/train/eval gộp chung một cell là **chưa đạt**.
 - Cell nên chạy lại độc lập khi debug; biến trung gian giữ ở global; đặt markdown heading cho từng phần.
 - Model: load từ path trước (`ft.load_weights`, `WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi path
   chưa có (và khi đó mới tải pretrained backbone).
@@ -337,37 +371,61 @@ fine-tune có thể để `RUN_XAI=False` để tiết kiệm GPU nhưng phải 
   (`*_summary.csv/json` + W&B table) và sync Drive.
 - Baseline chính (P) phải được train lại cùng budget nếu protocol khác trước đó.
 
+Đây là yêu cầu cho nghiên cứu đối chứng/ablation đã được cho phép, không phải sự cho phép thêm biến thể,
+train lại hoặc thêm seed vào thí nghiệm có phạm vi khác.
+
+### 3.15 Bắt buộc kiểm tra chạy thật trước khi push
+
+Trước khi commit/push bất kỳ notebook/config dành cho chạy thật, hãy chạy smoke **ở local**, sau đó chuyển mọi cờ
+smoke/kiểm thử về chế độ chạy thật. Đây là bước bắt buộc của mọi lần push, không phải dọn dẹp tùy chọn. Sản phẩm
+đã push phải chạy được ngay như thí nghiệm thật.
+
+- Đặt mọi cờ `*_SMOKE` về chạy thật: bỏ trống, hoặc đặt `0`/`false`. Không để `SMOKE=True`,
+  `os.environ['<PREFIX>_SMOKE'] = '1'`, `setdefault(..., '1')` hay mặc định smoke nào đang bật.
+- Bỏ các mặc định chỉ dành cho smoke: `EPOCHS`/số mẫu tí hon, nhánh dữ liệu synthetic, W&B offline, output `/tmp`,
+  `RES2D`/`RES3D` thu nhỏ, `RUN_GROUP`/`RUN_TARGET` của smoke.
+- Đặt identity và stage switch cho chạy thật một cách có chủ đích (`RUN_GROUP`, `RUN_TARGET`, `RESUME`,
+  `EXTEND_EPOCHS`, `RUN_XAI`, `RUN_INFO`), đúng phạm vi đã được duyệt.
+- Vẫn giữ khả năng smoke trong code (gate bằng env), nhưng trạng thái đã commit phải là trạng thái chạy thật.
+- Kiểm tra trước khi push:
+  ```bash
+  rg -n "_SMOKE|SMOKE\s*=\s*True|setdefault\(['\"][A-Z_]*SMOKE" notebooks configs scripts
+  ```
+  Mọi kết quả phải được gate bằng env với mặc định chạy thật; không kết quả nào được ép bật smoke.
+- Báo cáo bước kiểm tra này cùng commit/push; không push nếu còn cờ smoke đang bật.
+
 ## 4. Checklist trước khi giao notebook
 
 - [ ] Đúng thứ tự cell mục 1; config một nguồn duy nhất, có env override.
 - [ ] **Cell config chia nhóm bằng dòng `#`** (nhóm cần sửa vs. `FROZEN`/derived), để biết cần cấu hình gì ở đâu và không sửa nhầm phần đã ổn.
 - [ ] Cell tách theo thành phần (mỗi cell 1 việc/nhóm việc), chạy lại được từng cell khi debug/sửa lỗi.
 - [ ] Tách cell data (tải/build-denoise/view/dataset-loader), train (model/trainer-probe/fit) và eval (val callback, test callback, calibrated report, log bảng) theo bảng 1.1.
-- [ ] Kiểm tra notebook thực tế có cell riêng + markdown heading cho D1–D4/T1–T3/E1–E6 (không gộp data/train/eval), không chỉ ghi trong tài liệu.
+- [ ] Kiểm tra notebook thực tế có cell riêng + markdown heading cho D1–D4/T1–T3/E1–E6, áp dụng ngoại lệ cell ngắn và giai đoạn tùy chọn nêu trên; không gộp data/train/eval hoặc chỉ ghi nhãn trong tài liệu.
 - [ ] Mỗi bước in log trạng thái có tiền tố (`[data]`/`[model]`/`[train]`/`[eval]`/`[xai]`/...) để theo dõi và debug.
 - [ ] Mỗi epoch log thời gian hoàn thành (`train/epoch_seconds` + in `[train] epoch N done in Xs`) để đo `sec/epoch`.
 - [ ] Mỗi epoch in rõ `[val ]` và `[test ]` (metric chính) ra stdout, không chỉ log W&B.
-- [ ] Model load từ path trước (`WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi chưa có weights.
+- [ ] Model load từ path trước (`WARM_START_WEIGHTS`/`best_weights.pt`); chỉ khởi tạo mới khi chưa có weights, theo thứ tự ưu tiên resume.
 - [ ] `*_SMOKE=1` chạy hết cell trên CPU, synthetic, không download — pass.
-- [ ] W&B init + log live đúng prefix + figures as `wandb.Image` + `summary.update` + `finish`.
-- [ ] **Train log đủ bộ metric mỗi optimizer step; val + test log đủ bộ metric mỗi epoch.**
-- [ ] **Chốt cuối có calibrated `train`/`val`/`test` + bootstrap CI và bảng `report/split_table` trên W&B.**
-- [ ] **Sau train chạy X-AI trên best model, log `xai/fusion_table` + giá trị `xai/*` lên W&B (hoặc ghi rõ ngoại lệ).**
+- [ ] **Kiểm tra chạy thật trước khi push** (mục 3.15): chạy smoke ở local, rồi đặt mọi cờ `*_SMOKE` về chạy thật (bỏ trống/`0`), bỏ mặc định smoke, và đặt identity/stage switch thật trước khi push.
+- [ ] W&B init + log live đúng prefix + hình X-AI/ảnh bằng `wandb.Image` + `summary.update` + `finish`.
+- [ ] **Train log đủ bộ metric mỗi optimizer step; val + test log đủ bộ metric mỗi epoch; theo dõi test không bao giờ dùng để lựa chọn.**
+- [ ] **Báo cáo cuối dùng checkpoint tốt nhất theo validation, có calibrated `train`/`val`/`test` + bootstrap CI và bảng `report/split_table` trên W&B.**
+- [ ] **Sau train chạy X-AI trên model tốt nhất theo validation, log `xai/fusion_table` + giá trị `xai/*` lên W&B (hoặc ghi rõ ngoại lệ).**
 - [ ] Chỉ số log bằng W&B table/scalar; **không vẽ đồ thị metrics** (đồ thị chỉ dùng cho X-AI/ảnh).
 - [ ] Info-theory (nếu có): đa-seed DV/NWJ/InfoNCE có negative-rate (không clamp); surrogate ≥1000 cho MIC; interaction information cho redundancy/synergy; tất cả log bằng table/scalar.
-- [ ] Notebook đối chứng/ablation: mỗi biến thể train lại, cùng budget/patience, ≥3 seed, có bảng mean ± std và mỗi (spec, seed) là run riêng.
+- [ ] Notebook đối chứng/ablation: mỗi biến thể train lại, cùng budget/patience, ≥3 seed, có bảng mean ± std và mỗi (spec, seed) là run riêng, trong phạm vi nghiên cứu đã được cho phép.
 - [ ] **Optional stages (X-AI/info-theory) là cờ trong cùng notebook, không tách/fork notebook; logic ở `scripts/`.**
-- [ ] Mọi artifact (figure/model/CSV/report/X-AI) sync Drive ngay khi sinh ra.
+- [ ] Mọi artifact (figure/model/CSV/report/X-AI) sync Drive ngay khi sinh ra; artifact có sẵn, kể cả đồ thị metrics cũ, vẫn phải sync.
 - [ ] HF download có `HF_TOKEN` + `allow_patterns` chỉ tải phần dùng; real run thiếu token fail sớm.
 - [ ] `STORE_RES` lấy từ config (200/128/96/…), không hardcode; check shape theo `STORE_RES`; tách khỏi `RES3D`/`RES2D`.
-- [ ] Quyết định cache/tái sử dụng/upload dữ liệu đã xử lý (khử nhiễu/view/augmentation) được ghi rõ.
+- [ ] Quyết định cache/tái sử dụng/upload dữ liệu đã xử lý (khử nhiễu/view/augmentation) được ghi rõ; dùng lại cache view qua các `RES3D` phải khớp `RES2D`, identity nguồn và phép chiếu.
 - [ ] AMP bật khi CUDA + `pin_memory`/`non_blocking`; hạn chế `.item()`/đồng bộ host trong vòng train.
 - [ ] Loader lazy/cache, chỉ đọc dữ liệu dùng đến; preprocessing đắt được cache/tái sử dụng.
 - [ ] Đo `sec/epoch` + peak VRAM; phân tích nặng (MI/X-AI) có giới hạn subset/steps.
 - [ ] Batch size chọn theo cấu hình+dữ liệu (`ft.find_batch_size`) tới ngân sách VRAM; giữ effective batch qua grad-accum; resume dùng lại batch đã lưu.
-- [ ] Best checkpoint theo val AUC; threshold/calibration fit trên val, không dùng test.
+- [ ] Best checkpoint theo val AUC; threshold/calibration fit trên val, không dùng test; dùng checkpoint đó cho báo cáo held-out cuối.
 - [ ] Resume-safe: `results.json` append + checkpoint atomic.
-- [ ] Cell train hỗ trợ gia hạn (`RESUME=True` + `EXTEND_EPOCHS=N`) mà không cần `RUN_GROUP` mới.
+- [ ] Cell train hỗ trợ gia hạn (`RESUME=True` + `EXTEND_EPOCHS=N`) mà không cần `RUN_GROUP` mới; không thực hiện gia hạn khi chưa được cho phép.
 - [ ] `ruff check` sạch cho file Python mới; unit-test core mới pass.
 - [ ] Notes/limitations được ghi rõ.
 

@@ -19,10 +19,13 @@ experiments (`STORE_RES`: 200/128/96, …); the main pipeline config uses raw 20
   - `make lint` = `ruff check pipeline models tests` + `ruff format --check`
   - **Never edit archived notebooks for lint** — pre-existing notebook lint noise is accepted
     (CI only lints `pipeline models tests`, not `notebooks/`).
-- No code comments unless asked; follow existing patterns (registry pattern,
+- No code comments unless asked, except mandatory notebook config-group headings
+  in `docs/notebook-conventions.en.md`; follow existing patterns (registry pattern,
   config-driven, rank-0-only logging).
-- `forward()` contract: return `{"logits": tensor}` (or HF-style object with `.loss`).
-- DataLoader must return `(x, y)` tuples or dicts with `"labels"`.
+- Pipeline `forward()` contract: return `{"logits": tensor}` (or HF-style object with `.loss`).
+- Pipeline DataLoader must return `(x, y)` tuples or dicts with `"labels"`.
+- Standalone multiview notebooks may use raw tensor logits and `(x, views, y)` batches
+  when their shared trainer expects those contracts; do not change the pipeline contract.
 
 ### Performance
 - Default to the fastest correct implementation: AMP (+ GradScaler), grad accumulation,
@@ -154,8 +157,19 @@ config.yaml → validate_config (fast fail) → build loaders → build model
 4. **Never** disable or drop wandb to "save time" — it is the live experiment log.
 
 ### Notebook conventions
+- Agents MUST read [`docs/notebook-conventions.en.md`](docs/notebook-conventions.en.md)
+  before creating, editing, or reviewing any training/research notebook. Always use
+  the English version as the canonical notebook specification, not the Vietnamese
+  human-facing companion [`docs/notebook-conventions.md`](docs/notebook-conventions.md).
+  Keep both language versions synchronized when changing conventions. The rules
+  below are a summary; explicit experiment limits still apply.
+- **Mandatory pre-push real-run check** (`docs/notebook-conventions.en.md` §3.15):
+  before every commit/push, run smoke locally, then switch **all** `*_SMOKE` flags
+  back to real run (unset or `0`), remove smoke-only defaults, and set the real
+  identity/stage switches. A pushed notebook/config must run the real experiment
+  immediately; report the check with the push.
 - Full cell structure + hard rules when creating a training/sweep notebook:
-  [`docs/notebook-conventions.md`](docs/notebook-conventions.md) — canonical example is
+  [`docs/notebook-conventions.en.md`](docs/notebook-conventions.en.md) — canonical example is
   `notebooks/3d_glaucoma_multiview_sota_sweep_xai.ipynb`.
 - Data policy: authenticated selective HF download (token + `allow_patterns`),
   config-driven `STORE_RES` (200/128/96/…), reuse caches, and evaluate versioned HF
