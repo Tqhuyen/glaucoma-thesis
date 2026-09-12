@@ -210,7 +210,9 @@ def _assert_metrics(actual, expected):
             assert actual[key] == pytest.approx(value, rel=2e-6, abs=2e-6), key
 
 
-@pytest.mark.parametrize("case", ["random", "zero", "constant", "edge", "original", "flattened", "mixed"])
+@pytest.mark.parametrize(
+    "case", ["random", "zero", "constant", "edge", "original", "flattened", "mixed", "empty_signal_varying_background"]
+)
 def test_metrics_against_independent_numpy(metric_engine, case):
     cp = metric_engine
     rng = np.random.default_rng(917)
@@ -234,6 +236,8 @@ def test_metrics_against_independent_numpy(metric_engine, case):
         raw[0].fill(0)
         raw[1].fill(255)
         den = raw.copy()
+    elif case == "empty_signal_varying_background":
+        raw.fill(127)
     context = suite.MetricContext(raw)
     actual, rows = context.evaluate(cp.asarray(den))
     expected, expected_rows = _reference(raw, den)
@@ -257,6 +261,9 @@ def test_metrics_against_independent_numpy(metric_engine, case):
     if case == "original":
         assert actual["beta"] == pytest.approx(1.0)
         assert actual["residual_rms"] == 0
+    elif case == "empty_signal_varying_background":
+        assert actual["ENL_bg"] is not None
+        assert actual["SNR_bg"] is None
     cached_mask = np.asarray(context.signal) if cp is np else cp.asnumpy(context.signal)
     second, _ = context.evaluate(cp.zeros_like(cp.asarray(den)))
     assert second["n_s"] == actual["n_s"]
