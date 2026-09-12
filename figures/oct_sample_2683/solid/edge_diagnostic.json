@@ -1,0 +1,14 @@
+{
+  "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2683.npy",
+  "visible_faces_xyz": [
+    "X=max",
+    "Y=0"
+  ],
+  "surface_cells_verified": 240000,
+  "surface_mapping_exact": true,
+  "shared_edge_equal": true,
+  "shared_edge_max_difference": 0,
+  "unfolded_edge_column": 31,
+  "adjacent_y_mean_absolute_difference": 12.12,
+  "adjacent_x_mean_absolute_difference": 13.985
+}

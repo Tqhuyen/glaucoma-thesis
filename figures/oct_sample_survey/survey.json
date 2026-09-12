@@ -1,0 +1,142 @@
+[
+  {
+    "sample": "raw_2401",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2401.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2404",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2404.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2469",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2469.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2541",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2541.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2615",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2615.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2683",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2683.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2760",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2760.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2863",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2863.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_2967",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2967.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_3037",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_3037.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_3100",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_3100.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_3162",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_3162.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_3234",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_3234.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  },
+  {
+    "sample": "raw_3294",
+    "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_3294.npy",
+    "shape": [
+      200,
+      200,
+      200
+    ],
+    "shared_edge_equal": true
+  }
+]

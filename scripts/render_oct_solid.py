@@ -17,6 +17,9 @@ def main():
     parser = argparse.ArgumentParser(description="Opaque OCT voxel block with original boundary intensities.")
     parser.add_argument("--volume", type=Path, default=Path(tempfile.gettempdir()) / "gf_vol_cache/raw_2404.npy")
     parser.add_argument("--output", type=Path, default=Path("figures/oct_sample_2404/solid"))
+    parser.add_argument("--slice-z", type=int)
+    parser.add_argument("--slice-x", type=int)
+    parser.add_argument("--slice-y", type=int)
     args = parser.parse_args()
     raw = np.load(args.volume, mmap_mode="r", allow_pickle=False)
     if raw.ndim != 3 or raw.dtype != np.uint8:
@@ -28,8 +31,12 @@ def main():
     np.testing.assert_array_equal(grid["intensity"].reshape(data.shape, order="F"), data)
     plotter = pv.Plotter(off_screen=True, window_size=(2000, 1800))
     plotter.set_background("white")
+    surface = grid.extract_surface(algorithm="dataset_surface")
+    indices = np.clip(np.floor(surface.cell_centers().points).astype(int), 0, np.array(data.shape) - 1)
+    np.testing.assert_array_equal(surface.cell_data["intensity"], data[tuple(indices.T)])
+    np.testing.assert_array_equal(data[-1, 0, :], raw[-1, :, 0])
     plotter.add_mesh(
-        grid.extract_surface(algorithm="dataset_surface"),
+        surface,
         scalars="intensity",
         preference="cell",
         cmap="gray",
@@ -60,7 +67,16 @@ def main():
         "view_up": list(plotter.camera.up),
         "parallel_scale": plotter.camera.parallel_scale,
     }
-    positions = [data.shape[0] // 2, data.shape[1] // 2, data.shape[2] // 6]
+    slice_z = data.shape[2] // 6 if args.slice_z is None else args.slice_z
+    if not 0 <= slice_z < data.shape[2]:
+        parser.error("--slice-z must be inside the volume depth range")
+    positions = [
+        data.shape[0] // 2 if args.slice_x is None else args.slice_x,
+        data.shape[1] // 2 if args.slice_y is None else args.slice_y,
+        slice_z,
+    ]
+    if any(not 0 <= position < data.shape[axis] for axis, position in enumerate(positions)):
+        parser.error("Slice indices must be inside the volume")
     x, y, z = np.array(positions, dtype=float) + 0.5
     sx, sy, sz = size
     colors = ["#1678ae", "#ba463b", "#a67608"]
@@ -69,8 +85,21 @@ def main():
         [[sx, y, sz], [sx, y, 0], [0, y, 0]],
         [[0, 0, z], [sx, 0, z], [sx, sy, z]],
     ]
-    targets = [[x, 0, sz * 0.25], [sx, y, sz * 0.65], [sx * 0.9, 0, z]]
-    for trace, color in zip(traces, colors):
+    anchor_depth = data.shape[2] // 2
+    anchor_voxels = [
+        [positions[0], 0, anchor_depth],
+        [data.shape[0] - 1, positions[1], anchor_depth],
+        [positions[0], 0, positions[2]],
+    ]
+    targets = np.asarray(anchor_voxels, dtype=float) + 0.5
+    targets[0, 1] = targets[2, 1] = 0
+    targets[1, 0] = sx
+    for index, (trace, color) in enumerate(zip(traces, colors)):
+        np.testing.assert_array_equal(np.asarray(trace)[:, index], np.full(3, positions[index] + 0.5))
+        assert targets[index, index] == positions[index] + 0.5
+        np.testing.assert_array_equal(
+            np.clip(np.floor(targets[index]).astype(int), 0, np.array(data.shape) - 1), anchor_voxels[index]
+        )
         plotter.add_lines(np.asarray(trace), color=color, width=5, connected=True)
     plotter.render()
     marked = plotter.screenshot(args.output / "oct_solid_slice_locations.png")
@@ -161,30 +190,63 @@ def main():
     np.testing.assert_array_equal(slice_arrays[0], raw[positions[0], :, :])
     np.testing.assert_array_equal(slice_arrays[1], raw[:, :, positions[1]].T)
     np.testing.assert_array_equal(slice_arrays[2], raw[:, positions[2], :])
+    slice_arrays[1] = slice_arrays[1][:, ::-1]
+    anchor_pixels = [(0, anchor_depth), (0, anchor_depth), (0, positions[0])]
     plane_names = ["YZ", "XZ", "XY"]
     axis_labels = [("Y", "Z"), ("X", "Z"), ("Y", "X")]
     for index, (pixels, color) in enumerate(zip(slice_arrays, colors)):
         section = fig.add_axes((0.79, 0.65 - index * 0.28, 0.18, 0.23))
         section.imshow(pixels, cmap="gray", vmin=0, vmax=255, interpolation="nearest")
         section.set_title(f"{plane_names[index]} | {'XYZ'[index]} = {positions[index]}", fontsize=11, color=color)
-        section.set(xlabel=axis_labels[index][0], ylabel=axis_labels[index][1], xticks=[], yticks=[])
+        section.set(
+            xlabel=axis_labels[index][0],
+            ylabel=axis_labels[index][1],
+            xticks=[0, pixels.shape[1] - 1],
+            yticks=[0, pixels.shape[0] - 1],
+        )
+        if index == 1:
+            section.set_xticklabels([pixels.shape[1] - 1, 0])
+        column, row = anchor_pixels[index]
+        assert pixels[row, column] == data[tuple(anchor_voxels[index])]
+        section.plot(
+            column,
+            row,
+            marker="o",
+            markersize=5,
+            markerfacecolor="white",
+            markeredgecolor=color,
+            markeredgewidth=1.5,
+            clip_on=False,
+            zorder=5,
+        )
+        block.plot(
+            *projected[index],
+            marker="o",
+            markersize=5,
+            markerfacecolor="white",
+            markeredgecolor=color,
+            markeredgewidth=1.5,
+            zorder=5,
+        )
         for spine in section.spines.values():
             spine.set_color(color)
             spine.set_linewidth(1.7)
         fig.add_artist(
             ConnectionPatch(
-                xyA=(0, 0.5),
-                coordsA=section.transAxes,
+                xyA=anchor_pixels[index],
+                coordsA=section.transData,
                 xyB=projected[index],
                 coordsB=block.transData,
                 arrowstyle="-|>",
                 mutation_scale=14,
                 linewidth=1.3,
                 color=color,
-                shrinkA=6,
+                shrinkA=3,
+                shrinkB=3,
             )
         )
-    fig.text(0.04, 0.17, "The OCT block covers a small retinal region, not the whole eye.", fontsize=12)
+    fig.text(0.04, 0.19, "Matching circles identify the same voxel in the block and the 2D slice.", fontsize=11)
+    fig.text(0.04, 0.155, "The OCT block covers a small retinal region, not the whole eye.", fontsize=11)
     fig.text(
         0.04,
         0.105,
@@ -200,6 +262,7 @@ def main():
         "source": str(args.volume.resolve()),
         "source_sha256": hashlib.sha256(args.volume.read_bytes()).hexdigest(),
         "source_shape": list(raw.shape),
+        "surface_cell_mapping_verified": int(surface.n_cells),
         "display_axis_source_order_xyz": [0, 2, 1],
         "depth_axis_assumed": 1,
         "spacing": [1, 1, 1],
@@ -213,6 +276,14 @@ def main():
         "camera": camera,
         "slice_indices_xyz": positions,
         "slice_plane_world_coordinates": [float(x), float(y), float(z)],
+        "slice_trace_world_coordinates": traces,
+        "anchor_voxel_indices_xyz": anchor_voxels,
+        "anchor_surface_world_coordinates": targets.tolist(),
+        "anchor_slice_display_pixels_column_row": anchor_pixels,
+        "anchor_render_pixels_column_row": projected,
+        "slice_display_horizontal_flips": [False, True, False],
+        "slice_anchor_intensities": [int(data[tuple(voxel)]) for voxel in anchor_voxels],
+        "coordinate_convention": "Voxel i occupies [i,i+1]; slice plane at i+0.5. Anchors lie on its exterior face.",
         "eye_location": "Illustrative optic-nerve-head region; no patient-specific registration",
         "pyvista_version": pv.__version__,
         "drive_sync": "deferred by user; local only",
@@ -227,6 +298,9 @@ def main():
         "near the optic nerve head. The enlarged voxel block and its three orthogonal slices use actual Harvard-GF "
         "data. The eye schematic is not patient-specific registration and does not establish the exact scan location "
         "or laterality of this sample. Colored traces show slice-plane intersections with the block exterior. "
+        "Matching circles mark the same voxel on a block face and in a slice, with its connector projected using "
+        "the rendering camera. The XZ panel is horizontally reversed to place X=max at its left edge; "
+        "its tick labels explicitly show decreasing X. This is a display orientation change, not data editing. "
         "X and Y are local lateral coordinates; Z is assumed depth. No nasal/temporal or superior/inferior "
         "orientation is asserted.\n",
         encoding="utf-8",

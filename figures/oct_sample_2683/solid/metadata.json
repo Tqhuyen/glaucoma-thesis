@@ -1,0 +1,188 @@
+{
+  "source": "C:\\Users\\huyen\\AppData\\Local\\Temp\\gf_vol_cache\\raw_2683.npy",
+  "source_sha256": "7f3fa37cfe4e0d17fc13c7a892a126d7ef297264decfe5aa439203f42d41d5db",
+  "source_shape": [
+    200,
+    200,
+    200
+  ],
+  "surface_cell_mapping_verified": 240000,
+  "display_axis_source_order_xyz": [
+    0,
+    2,
+    1
+  ],
+  "depth_axis_assumed": 1,
+  "spacing": [
+    1,
+    1,
+    1
+  ],
+  "units": "voxel",
+  "opacity": 1,
+  "representation": "Opaque boundary of voxel cells, original intensity per cell",
+  "clim": [
+    0,
+    255
+  ],
+  "smoothing": null,
+  "downsampling": null,
+  "lighting": false,
+  "camera": {
+    "position": [
+      620.0,
+      -500.0,
+      -260.0
+    ],
+    "focal_point": [
+      100.0,
+      100.0,
+      100.0
+    ],
+    "view_up": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "parallel_scale": 172.0
+  },
+  "slice_indices_xyz": [
+    100,
+    100,
+    75
+  ],
+  "slice_plane_world_coordinates": [
+    100.5,
+    100.5,
+    75.5
+  ],
+  "slice_trace_world_coordinates": [
+    [
+      [
+        100.5,
+        0,
+        200.0
+      ],
+      [
+        100.5,
+        0,
+        0
+      ],
+      [
+        100.5,
+        200.0,
+        0
+      ]
+    ],
+    [
+      [
+        200.0,
+        100.5,
+        200.0
+      ],
+      [
+        200.0,
+        100.5,
+        0
+      ],
+      [
+        0,
+        100.5,
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        0,
+        75.5
+      ],
+      [
+        200.0,
+        0,
+        75.5
+      ],
+      [
+        200.0,
+        200.0,
+        75.5
+      ]
+    ]
+  ],
+  "anchor_voxel_indices_xyz": [
+    [
+      100,
+      0,
+      100
+    ],
+    [
+      199,
+      100,
+      100
+    ],
+    [
+      100,
+      0,
+      75
+    ]
+  ],
+  "anchor_surface_world_coordinates": [
+    [
+      100.5,
+      0.0,
+      100.5
+    ],
+    [
+      200.0,
+      100.5,
+      100.5
+    ],
+    [
+      100.5,
+      0.0,
+      75.5
+    ]
+  ],
+  "anchor_slice_display_pixels_column_row": [
+    [
+      0,
+      100
+    ],
+    [
+      0,
+      100
+    ],
+    [
+      0,
+      100
+    ]
+  ],
+  "anchor_render_pixels_column_row": [
+    [
+      1340.7191184322696,
+      1065.3778577223607
+    ],
+    [
+      602.8678128292349,
+      1042.0821757062024
+    ],
+    [
+      1340.7191184322696,
+      946.2384663105435
+    ]
+  ],
+  "slice_display_horizontal_flips": [
+    false,
+    true,
+    false
+  ],
+  "slice_anchor_intensities": [
+    38,
+    66,
+    81
+  ],
+  "coordinate_convention": "Voxel i occupies [i,i+1]; slice plane at i+0.5. Anchors lie on its exterior face.",
+  "eye_location": "Illustrative optic-nerve-head region; no patient-specific registration",
+  "pyvista_version": "0.49.0",
+  "drive_sync": "deferred by user; local only"
+}

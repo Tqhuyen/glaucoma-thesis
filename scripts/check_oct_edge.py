@@ -1,3 +1,4 @@
+import argparse
 import json
 import tempfile
 from pathlib import Path
@@ -11,8 +12,12 @@ import pyvista as pv
 
 
 def main():
-    source = Path(tempfile.gettempdir()) / "gf_vol_cache/raw_2404.npy"
-    output = Path("figures/oct_sample_2404/solid")
+    parser = argparse.ArgumentParser(description="Check shared OCT face edges and surface cell mapping.")
+    parser.add_argument("--volume", type=Path, default=Path(tempfile.gettempdir()) / "gf_vol_cache/raw_2404.npy")
+    parser.add_argument("--output", type=Path, default=Path("figures/oct_sample_2404/solid"))
+    args = parser.parse_args()
+    source = args.volume
+    output = args.output
     raw = np.load(source, mmap_mode="r", allow_pickle=False)
     data = raw.transpose(0, 2, 1)
     grid = pv.ImageData(dimensions=np.array(data.shape) + 1)
