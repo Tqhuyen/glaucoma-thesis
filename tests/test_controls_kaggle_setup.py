@@ -24,6 +24,8 @@ def setup_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(ks, "_BOOTSTRAP_VERIFIED", False)
     monkeypatch.setenv("CTRL_KAGGLE_TEMP_ROOT", str(tmp_path))
     monkeypatch.setattr(ks, "configure_caches", lambda *a: None)
+    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: "nvidia-smi")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     is_dir = Path.is_dir
     monkeypatch.setattr(Path, "is_dir", lambda p: p == Path("/kaggle") or is_dir(p))
     monkeypatch.setattr(ks, "process_identity", lambda: "first-kernel")
@@ -565,3 +567,66 @@ def test_stop_retains_worker_failure(tmp_path):
         assert not kg.OWNED_CHILDREN
     finally:
         kg.OWNED_CHILDREN.pop(998877, None)
+
+
+def test_begin_setup_clears_empty_cuda_visible_devices(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    monkeypatch.setenv(ks.PENDING, "")
+    ks.begin_setup()
+    assert "CUDA_VISIBLE_DEVICES" not in os.environ
+    assert os.environ.get(ks.PENDING) == "1"
+
+
+def test_gpu_query_ignores_leftover_empty_cuda_visible_devices(setup_runtime, monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    seen = {}
+    original = ks.subprocess.run
+
+    def run(command, **kwargs):
+        seen["env"] = kwargs.get("env")
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(ks.subprocess, "run", run)
+    listing = ks.gpu_query("index,name,driver_version")
+    assert "CUDA_VISIBLE_DEVICES" not in seen["env"]
+    assert "Tesla P100" in listing
+
+
+def test_gpu_query_missing_binary_is_actionable(monkeypatch):
+    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: None)
+    with pytest.raises(RuntimeError, match="nvidia-smi was not found"):
+        ks.gpu_query("index")
+
+
+def test_gpu_query_failure_names_accelerator(monkeypatch):
+    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: "nvidia-smi")
+    monkeypatch.setattr(
+        ks.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=6, stdout="", stderr="No devices were found"),
+    )
+    with pytest.raises(RuntimeError, match="Enable the Kaggle GPU accelerator"):
+        ks.gpu_query("index")
+
+
+def test_gpu_query_empty_output_is_actionable(monkeypatch):
+    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: "nvidia-smi")
+    monkeypatch.setattr(ks.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="   "))
+    with pytest.raises(RuntimeError, match="reported no GPUs"):
+        ks.gpu_query("index")
+
+
+def test_detect_gpus_uses_clean_query(monkeypatch):
+    from scripts import controls_kaggle as kg
+
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    calls = []
+
+    def query(fields, *, nounits=False):
+        calls.append((fields, nounits))
+        return "0, Tesla T4, 15360\n1, Tesla T4, 15360\n"
+
+    monkeypatch.setattr(kg.ks, "gpu_query", query)
+    devices = kg.detect_gpus("auto")
+    assert [device["physical"] for device in devices] == ["0", "1"]
+    assert calls == [("index,name,memory.total", True)]

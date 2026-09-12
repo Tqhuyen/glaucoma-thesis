@@ -294,9 +294,7 @@ def jobs(cfg):
 
 def detect_gpus(mode="auto", *, listing=None):
     if listing is None:
-        listing = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=index,name,memory.total", "--format=csv,noheader,nounits"], text=True
-        )
+        listing = ks.gpu_query("index,name,memory.total", nounits=True)
     devices = []
     for row in csv.reader(listing.strip().splitlines()):
         physical, name, memory = (value.strip() for value in row)

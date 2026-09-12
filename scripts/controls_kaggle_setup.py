@@ -78,11 +78,60 @@ def process_identity():
     return f"{os.getpid()}:{start}"
 
 
+def nvidia_smi_binary():
+    for candidate in (shutil.which("nvidia-smi"), "/usr/bin/nvidia-smi", "/usr/local/nvidia/bin/nvidia-smi"):
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
+def gpu_query(fields, *, nounits=False):
+    """Enumerate physical GPUs; ignore a leftover empty CUDA_VISIBLE_DEVICES."""
+    binary = nvidia_smi_binary()
+    if binary is None:
+        raise RuntimeError(
+            "nvidia-smi was not found. Enable the Kaggle GPU accelerator (P100 or T4 x2), restart the session, then "
+            "rerun Setup. CPU-only sessions cannot run real training."
+        )
+    environment = {key: value for key, value in os.environ.items() if key != "CUDA_VISIBLE_DEVICES"}
+    fmt = "--format=csv,noheader" + (",nounits" if nounits else "")
+    try:
+        result = subprocess.run(
+            [binary, f"--query-gpu={fields}", fmt],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "nvidia-smi timed out; the GPU/driver is not responding. Restart the Kaggle session."
+        ) from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip().replace("\n", " ")[:300]
+        nodes = sorted(path.name for path in Path("/dev").glob("nvidia*")) if Path("/dev").is_dir() else []
+        raise RuntimeError(
+            f"nvidia-smi failed (rc={result.returncode}) at {binary}: {detail or 'no output'}; "
+            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}; /dev nodes={nodes or 'none'}. "
+            "Enable the Kaggle GPU accelerator (GPU P100 or GPU T4 x2), restart the session so the GPU is attached, "
+            "then rerun Setup. If you ran CPU smoke in this kernel first, restart the kernel before a real run."
+        )
+    if not result.stdout.strip():
+        raise RuntimeError(
+            "nvidia-smi reported no GPUs. Enable the Kaggle GPU accelerator (GPU P100 or GPU T4 x2), restart the "
+            "session, then rerun Setup; CPU smoke is not a real run."
+        )
+    return result.stdout
+
+
 def begin_setup(*, smoke=False):
     if smoke:
         return
     global _BOOTSTRAP_VERIFIED
     _BOOTSTRAP_VERIFIED = False
+    if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        print("[setup] cleared empty CUDA_VISIBLE_DEVICES left by a prior CPU smoke run", flush=True)
     os.environ[PENDING] = "1"
 
 
@@ -311,15 +360,8 @@ def bootstrap(*, smoke=False, auto_repair_p100=True, defer_ready=False):
         raise RestartRequired(
             "Package installation attempted in this kernel. Restart kernel, then run Setup; never reload Torch."
         )
-    listing = subprocess.run(
-        ["nvidia-smi", "--query-gpu=index,name,driver_version", "--format=csv,noheader"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if listing.returncode:
-        raise RuntimeError("nvidia-smi driver check failed; select a working Kaggle GPU image, not a Torch repair")
-    devices = [[item.strip() for item in row] for row in csv.reader(listing.stdout.strip().splitlines())]
+    listing = gpu_query("index,name,driver_version")
+    devices = [[item.strip() for item in row] for row in csv.reader(listing.strip().splitlines())]
     if not devices or any(len(row) != 3 or not any(gpu in row[1] for gpu in ("P100", "T4")) for row in devices):
         raise RuntimeError("Require Kaggle P100 or T4 hardware")
     reports = []

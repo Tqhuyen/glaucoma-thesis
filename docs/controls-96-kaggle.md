@@ -62,8 +62,13 @@ environment overrides and `CTRL_KAGGLE_TEMP_ROOT` / `CTRL_KAGGLE_OUTPUT_ROOT`.
 `HF_HOME`, `HF_HUB_CACHE`, `HF_XET_CACHE`, `TORCH_HOME`, `WANDB_CACHE_DIR`,
 `WANDB_DATA_DIR` and `WANDB_DIR` therefore take effect at import time.
 
-The bootstrap queries `nvidia-smi` for physical GPU and driver. Each GPU gets an
-isolated Python subprocess that imports Torch/torchvision, reports versions,
+The bootstrap queries `nvidia-smi` for physical GPU and driver, ignoring any
+`CUDA_VISIBLE_DEVICES` value (including an empty one left by a prior CPU smoke run)
+so physical devices are always enumerated. `begin_setup()` also removes an empty
+`CUDA_VISIBLE_DEVICES` before a real run. If `nvidia-smi` is missing, exits non-zero,
+or lists no GPU, setup stops with the accelerators to enable (GPU P100 or GPU T4 x2)
+and the instruction to restart the session; it never falls back to CPU training.
+Each GPU gets an isolated Python subprocess that imports Torch/torchvision, reports versions,
 CUDA runtime, architecture list and capability, executes a tiny CUDA addition,
 and verifies native torchvision NMS. The notebook parent never initializes CUDA.
 These probes run only when the user actually executes real setup on Kaggle.
