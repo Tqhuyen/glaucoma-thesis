@@ -294,15 +294,20 @@ def jobs(cfg):
 
 def detect_gpus(mode="auto", *, listing=None):
     if listing is None:
-        listing = ks.gpu_query("index,name,memory.total", nounits=True)
-    devices = []
-    for row in csv.reader(listing.strip().splitlines()):
-        physical, name, memory = (value.strip() for value in row)
-        if "P100" not in name and "T4" not in name:
-            raise RuntimeError(f"Unvalidated accelerator: {name}; require Kaggle P100 or T4")
-        devices.append(dict(physical=physical, name=name, memory_mib=int(memory)))
+        devices = [
+            dict(physical=device["physical"], name=device["name"], memory_mib=device["memory_mib"])
+            for device in ks.gpu_devices()
+        ]
+    else:
+        devices = []
+        for row in csv.reader(listing.strip().splitlines()):
+            physical, name, memory = (value.strip() for value in row)
+            devices.append(dict(physical=physical, name=name, memory_mib=int(memory)))
     if not devices:
         raise RuntimeError("No GPU detected; real training requires P100/T4")
+    for device in devices:
+        if "P100" not in device["name"] and "T4" not in device["name"]:
+            raise RuntimeError(f"Unvalidated accelerator: {device['name']}; require Kaggle P100 or T4")
     if mode == "single" or len(devices) == 1:
         return devices[:1]
     if len(devices) == 2 and all("T4" in device["name"] for device in devices):

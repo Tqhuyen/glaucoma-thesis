@@ -62,12 +62,17 @@ environment overrides and `CTRL_KAGGLE_TEMP_ROOT` / `CTRL_KAGGLE_OUTPUT_ROOT`.
 `HF_HOME`, `HF_HUB_CACHE`, `HF_XET_CACHE`, `TORCH_HOME`, `WANDB_CACHE_DIR`,
 `WANDB_DATA_DIR` and `WANDB_DIR` therefore take effect at import time.
 
-The bootstrap queries `nvidia-smi` for physical GPU and driver, ignoring any
-`CUDA_VISIBLE_DEVICES` value (including an empty one left by a prior CPU smoke run)
-so physical devices are always enumerated. `begin_setup()` also removes an empty
-`CUDA_VISIBLE_DEVICES` before a real run. If `nvidia-smi` is missing, exits non-zero,
-or lists no GPU, setup stops with the accelerators to enable (GPU P100 or GPU T4 x2)
-and the instruction to restart the session; it never falls back to CPU training.
+The bootstrap enumerates physical GPUs, ignoring any `CUDA_VISIBLE_DEVICES` value
+(including an empty one left by a prior CPU smoke run); `begin_setup()` also removes
+an empty `CUDA_VISIBLE_DEVICES` before a real run. It tries every `nvidia-smi`
+candidate (`PATH`, `/usr/bin`, `/usr/local/nvidia/bin`, `/opt/bin`) and augments
+`LD_LIBRARY_PATH` with the usual NVML locations, because Kaggle images can put a
+broken `nvidia-smi` earlier on `PATH` ("couldn't find libnvidia-ml.so") even while
+`/dev/nvidia0` exists. If every binary fails, it falls back to
+`/proc/driver/nvidia/gpus/*/information` and `/proc/driver/nvidia/version`, which
+still identify the P100/T4 model without NVML. Only when no method finds a P100/T4
+does setup stop with the accelerators to enable (GPU P100 or GPU T4 x2) and a
+restart instruction; it never falls back to CPU training.
 Each GPU gets an isolated Python subprocess that imports Torch/torchvision, reports versions,
 CUDA runtime, architecture list and capability, executes a tiny CUDA addition,
 and verifies native torchvision NMS. The notebook parent never initializes CUDA.

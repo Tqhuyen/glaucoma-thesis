@@ -24,7 +24,8 @@ def setup_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(ks, "_BOOTSTRAP_VERIFIED", False)
     monkeypatch.setenv("CTRL_KAGGLE_TEMP_ROOT", str(tmp_path))
     monkeypatch.setattr(ks, "configure_caches", lambda *a: None)
-    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: "nvidia-smi")
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: ["nvidia-smi"])
+    monkeypatch.setattr(ks, "proc_gpu_devices", lambda: [])
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     is_dir = Path.is_dir
     monkeypatch.setattr(Path, "is_dir", lambda p: p == Path("/kaggle") or is_dir(p))
@@ -39,6 +40,8 @@ def setup_runtime(tmp_path, monkeypatch):
     def run(command, **kwargs):
         calls.append((command, kwargs))
         if command[0] == "nvidia-smi":
+            if "memory.total" in command[1]:
+                return SimpleNamespace(returncode=0, stdout=f"0, {state.name}, 15360, 550.54\n")
             return SimpleNamespace(returncode=0, stdout=f"0, {state.name}, 550.54\n")
         assert command[:4] == [sys.executable, "-m", "pip", "install"]
         return SimpleNamespace(returncode=0)
@@ -593,40 +596,78 @@ def test_gpu_query_ignores_leftover_empty_cuda_visible_devices(setup_runtime, mo
 
 
 def test_gpu_query_missing_binary_is_actionable(monkeypatch):
-    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: None)
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: [])
     with pytest.raises(RuntimeError, match="nvidia-smi was not found"):
         ks.gpu_query("index")
 
 
 def test_gpu_query_failure_names_accelerator(monkeypatch):
-    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: "nvidia-smi")
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: ["nvidia-smi"])
     monkeypatch.setattr(
         ks.subprocess,
         "run",
         lambda *a, **k: SimpleNamespace(returncode=6, stdout="", stderr="No devices were found"),
     )
-    with pytest.raises(RuntimeError, match="Enable the Kaggle GPU accelerator"):
+    with pytest.raises(RuntimeError, match="nvidia-smi rc=6"):
         ks.gpu_query("index")
 
 
 def test_gpu_query_empty_output_is_actionable(monkeypatch):
-    monkeypatch.setattr(ks, "nvidia_smi_binary", lambda: "nvidia-smi")
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: ["nvidia-smi"])
     monkeypatch.setattr(ks.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="   "))
     with pytest.raises(RuntimeError, match="reported no GPUs"):
         ks.gpu_query("index")
+
+
+def test_gpu_devices_falls_back_to_next_candidate(monkeypatch):
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: ["/opt/bin/nvidia-smi", "/usr/bin/nvidia-smi"])
+    monkeypatch.setattr(ks, "proc_gpu_devices", lambda: [])
+
+    def run(command, **kwargs):
+        if command[0] == "/opt/bin/nvidia-smi":
+            return SimpleNamespace(returncode=12, stdout="", stderr="couldn't find libnvidia-ml.so")
+        return SimpleNamespace(returncode=0, stdout="0, Tesla P100-PCIE-16GB, 16384, 550.54\n")
+
+    monkeypatch.setattr(ks.subprocess, "run", run)
+    devices = ks.gpu_devices()
+    assert devices == [{"physical": "0", "name": "Tesla P100-PCIE-16GB", "memory_mib": 16384, "driver": "550.54"}]
+
+
+def test_gpu_devices_falls_back_to_proc_driver(tmp_path, monkeypatch):
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: ["/opt/bin/nvidia-smi"])
+    monkeypatch.setattr(
+        ks.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=12, stdout="", stderr="couldn't find libnvidia-ml.so"),
+    )
+    monkeypatch.setattr(
+        ks, "proc_gpu_devices", lambda: [{"physical": "0", "name": "Tesla T4", "memory_mib": 15360, "driver": "550"}]
+    )
+    assert ks.gpu_devices()[0]["name"] == "Tesla T4"
+
+
+def test_gpu_devices_reports_no_gpu(monkeypatch):
+    monkeypatch.setattr(ks, "nvidia_smi_candidates", lambda: ["/opt/bin/nvidia-smi"])
+    monkeypatch.setattr(ks, "proc_gpu_devices", lambda: [])
+    monkeypatch.setattr(
+        ks.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=12, stdout="", stderr="couldn't find libnvidia-ml.so"),
+    )
+    with pytest.raises(RuntimeError, match="No working NVIDIA GPU detected"):
+        ks.gpu_devices()
 
 
 def test_detect_gpus_uses_clean_query(monkeypatch):
     from scripts import controls_kaggle as kg
 
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
-    calls = []
 
-    def query(fields, *, nounits=False):
-        calls.append((fields, nounits))
-        return "0, Tesla T4, 15360\n1, Tesla T4, 15360\n"
+    def devices():
+        return [
+            {"physical": "0", "name": "Tesla T4", "memory_mib": 15360, "driver": "550"},
+            {"physical": "1", "name": "Tesla T4", "memory_mib": 15360, "driver": "550"},
+        ]
 
-    monkeypatch.setattr(kg.ks, "gpu_query", query)
-    devices = kg.detect_gpus("auto")
-    assert [device["physical"] for device in devices] == ["0", "1"]
-    assert calls == [("index,name,memory.total", True)]
+    monkeypatch.setattr(kg.ks, "gpu_devices", devices)
+    assert [device["physical"] for device in kg.detect_gpus("auto")] == ["0", "1"]
