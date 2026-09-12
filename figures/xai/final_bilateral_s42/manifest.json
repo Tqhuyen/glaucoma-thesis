@@ -1,0 +1,781 @@
+{
+  "final_bilateral_s42_xai": {
+    "id": "iow9ispv",
+    "state": "finished",
+    "url": "https://wandb.ai/quang-huyen/glaucoma-thesis/runs/iow9ispv",
+    "config": {
+      "lr": 5e-05,
+      "n2d": 2,
+      "data": {
+        "config": {
+          "n2d": 2,
+          "res2d": 224,
+          "method": "bilateral",
+          "params": {
+            "bins": 10000,
+            "cval": 0,
+            "mode": "constant",
+            "win_size": null,
+            "sigma_color": 0.1,
+            "channel_axis": null,
+            "sigma_spatial": 4
+          },
+          "versions": {
+            "numpy": "2.1.3",
+            "torch": "2.11.0",
+            "manifest": 2,
+            "code_sha256": "89f54d3f2fcd057def86283a6aaf3e08fabe8e6daf29d1c8b5cda06008de5dcf",
+            "views_marker": 1,
+            "denoise_marker": 2
+          },
+          "compatibility": {
+            "res2d": 224,
+            "views": {
+              "n2d": 2,
+              "resize": "bilinear-align_corners=False-clip-uint8",
+              "code_sha256": "16214a8739c93732688992b2b72c627bf70e56d930283f7be34940b173a20473",
+              "builder_sha256": "b6ff10fc1ba7cd7b8df54bf413236bfee7b4e0f6133773d9d93e1ece6491d0a4"
+            },
+            "method": "bilateral",
+            "params": {
+              "bins": 10000,
+              "cval": 0,
+              "mode": "constant",
+              "win_size": null,
+              "sigma_color": 0.1,
+              "channel_axis": null,
+              "sigma_spatial": 4
+            },
+            "implementation": "skimage.restoration.denoise_bilateral",
+            "filter_code_sha256": "635c0131df396438e5ce4baff38fef04e610c964cc2ceb8cccabd2d1a3b59213"
+          },
+          "implementation": "skimage.restoration.denoise_bilateral"
+        },
+        "splits": {
+          "Test": {
+            "files": {
+              "dzs": {
+                "size": 1028,
+                "dtype": "|i1",
+                "shape": [
+                  900
+                ],
+                "sha256": "8bd3d1c6da45f357ffd4d53c75915f8f11577c65406ca7e56fcf8379210b284f"
+              },
+              "views": {
+                "size": 90316928,
+                "dtype": "|u1",
+                "shape": [
+                  900,
+                  2,
+                  224,
+                  224
+                ],
+                "sha256": "25970cede45d90f5b0b51803c6cefff6a63b3bc401a5524bcedc8fffeeaf4cd8"
+              },
+              "labels": {
+                "size": 7328,
+                "dtype": "<i8",
+                "shape": [
+                  900
+                ],
+                "sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e"
+              },
+              "denoised": {
+                "size": 7200000128,
+                "dtype": "|u1",
+                "shape": [
+                  900,
+                  1,
+                  200,
+                  200,
+                  200
+                ],
+                "sha256": "c5e49d31aa2908eb81d19dc79815fd91b3ea70d40bc54a570f72fc36036a61f9"
+              }
+            },
+            "sources": {
+              "raw": {
+                "size": 7200000128,
+                "dtype": "|u1",
+                "shape": [
+                  900,
+                  1,
+                  200,
+                  200,
+                  200
+                ],
+                "sha256": "d33b1ddd5fa957bff80f1d38ed5d17bdc3c4041f890c2f19b92b88db4eef8fe6"
+              },
+              "labels": {
+                "size": 7328,
+                "dtype": "<i8",
+                "shape": [
+                  900
+                ],
+                "sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e"
+              }
+            },
+            "provenance": {
+              "cpu_export": {
+                "axis": 0,
+                "numpy": "2.1.1",
+                "format": 1,
+                "method": "bilateral",
+                "params": {
+                  "bins": 10000,
+                  "cval": 0,
+                  "mode": "constant",
+                  "win_size": null,
+                  "sigma_color": 0.1,
+                  "channel_axis": null,
+                  "sigma_spatial": 4
+                },
+                "skimage": "0.26.0",
+                "sources": {
+                  "Test": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Test_volumes.npy",
+                    "size": 7200000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      900,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Test_volumes.npy",
+                    "class_counts": {
+                      "0": 411,
+                      "1": 489
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  },
+                  "Training": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Training_volumes.npy",
+                    "size": 16800000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      2100,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Training_volumes.npy",
+                    "class_counts": {
+                      "0": 1017,
+                      "1": 1083
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  },
+                  "Validation": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Validation_volumes.npy",
+                    "size": 2400000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      300,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Validation_volumes.npy",
+                    "class_counts": {
+                      "0": 124,
+                      "1": 176
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  }
+                },
+                "resolution": 200,
+                "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+                "output_dtype": "uint8",
+                "quantization": "float32 /255 -> filter -> clip *255 -> uint8 truncation",
+                "implementation": "skimage.restoration.denoise_bilateral",
+                "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020",
+                "filter_code_sha256": "635c0131df396438e5ce4baff38fef04e610c964cc2ceb8cccabd2d1a3b59213"
+              },
+              "raw_download": {
+                "sources": {
+                  "Test": {
+                    "sha256": "d33b1ddd5fa957bff80f1d38ed5d17bdc3c4041f890c2f19b92b88db4eef8fe6",
+                    "labels_sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e"
+                  }
+                },
+                "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+                "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+              },
+              "views_versions": {
+                "numpy": "2.1.3",
+                "torch": "2.11.0",
+                "manifest": 2,
+                "code_sha256": "89f54d3f2fcd057def86283a6aaf3e08fabe8e6daf29d1c8b5cda06008de5dcf",
+                "views_marker": 1,
+                "denoise_marker": 2
+              }
+            }
+          },
+          "Training": {
+            "files": {
+              "dzs": {
+                "size": 2228,
+                "dtype": "|i1",
+                "shape": [
+                  2100
+                ],
+                "sha256": "3c6864abad8a6f4bdf61fbc60347f03435dae740f0757f8ed932a41c2130963f"
+              },
+              "views": {
+                "size": 210739328,
+                "dtype": "|u1",
+                "shape": [
+                  2100,
+                  2,
+                  224,
+                  224
+                ],
+                "sha256": "29563ec7a3b0d54b3e984aa8e4dfc3796a27ff842133e18bccc9e9de1651a55f"
+              },
+              "labels": {
+                "size": 16928,
+                "dtype": "<i8",
+                "shape": [
+                  2100
+                ],
+                "sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f"
+              },
+              "denoised": {
+                "size": 16800000128,
+                "dtype": "|u1",
+                "shape": [
+                  2100,
+                  1,
+                  200,
+                  200,
+                  200
+                ],
+                "sha256": "de770a2b73477162399026bc37e4c3a8af0e24895cc59b9b796cfa9bd67b73ce"
+              }
+            },
+            "sources": {
+              "raw": {
+                "size": 16800000128,
+                "dtype": "|u1",
+                "shape": [
+                  2100,
+                  1,
+                  200,
+                  200,
+                  200
+                ],
+                "sha256": "9fc27d536e4af880fea95ed5e5ba3e92013123c1b0caf830c42ea187612756dd"
+              },
+              "labels": {
+                "size": 16928,
+                "dtype": "<i8",
+                "shape": [
+                  2100
+                ],
+                "sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f"
+              }
+            },
+            "provenance": {
+              "cpu_export": {
+                "axis": 0,
+                "numpy": "2.1.1",
+                "format": 1,
+                "method": "bilateral",
+                "params": {
+                  "bins": 10000,
+                  "cval": 0,
+                  "mode": "constant",
+                  "win_size": null,
+                  "sigma_color": 0.1,
+                  "channel_axis": null,
+                  "sigma_spatial": 4
+                },
+                "skimage": "0.26.0",
+                "sources": {
+                  "Test": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Test_volumes.npy",
+                    "size": 7200000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      900,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Test_volumes.npy",
+                    "class_counts": {
+                      "0": 411,
+                      "1": 489
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  },
+                  "Training": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Training_volumes.npy",
+                    "size": 16800000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      2100,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Training_volumes.npy",
+                    "class_counts": {
+                      "0": 1017,
+                      "1": 1083
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  },
+                  "Validation": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Validation_volumes.npy",
+                    "size": 2400000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      300,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Validation_volumes.npy",
+                    "class_counts": {
+                      "0": 124,
+                      "1": 176
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  }
+                },
+                "resolution": 200,
+                "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+                "output_dtype": "uint8",
+                "quantization": "float32 /255 -> filter -> clip *255 -> uint8 truncation",
+                "implementation": "skimage.restoration.denoise_bilateral",
+                "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020",
+                "filter_code_sha256": "635c0131df396438e5ce4baff38fef04e610c964cc2ceb8cccabd2d1a3b59213"
+              },
+              "raw_download": {
+                "sources": {
+                  "Training": {
+                    "sha256": "9fc27d536e4af880fea95ed5e5ba3e92013123c1b0caf830c42ea187612756dd",
+                    "labels_sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f"
+                  }
+                },
+                "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+                "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+              },
+              "views_versions": {
+                "numpy": "2.1.3",
+                "torch": "2.11.0",
+                "manifest": 2,
+                "code_sha256": "89f54d3f2fcd057def86283a6aaf3e08fabe8e6daf29d1c8b5cda06008de5dcf",
+                "views_marker": 1,
+                "denoise_marker": 2
+              }
+            }
+          },
+          "Validation": {
+            "files": {
+              "dzs": {
+                "size": 428,
+                "dtype": "|i1",
+                "shape": [
+                  300
+                ],
+                "sha256": "615d39139dc80e04679878ecd5cceb9a41e24232b05995f08aea9ffddcd4d8bb"
+              },
+              "views": {
+                "size": 30105728,
+                "dtype": "|u1",
+                "shape": [
+                  300,
+                  2,
+                  224,
+                  224
+                ],
+                "sha256": "67cf87c1c032707eb2fc4d6d2e931aed2517e33bdd25665b3a245c6d2a231a79"
+              },
+              "labels": {
+                "size": 2528,
+                "dtype": "<i8",
+                "shape": [
+                  300
+                ],
+                "sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d"
+              },
+              "denoised": {
+                "size": 2400000128,
+                "dtype": "|u1",
+                "shape": [
+                  300,
+                  1,
+                  200,
+                  200,
+                  200
+                ],
+                "sha256": "00ba0a1a4c31752e536115170b82a4347629548811573f1f63bef96de1608b40"
+              }
+            },
+            "sources": {
+              "raw": {
+                "size": 2400000128,
+                "dtype": "|u1",
+                "shape": [
+                  300,
+                  1,
+                  200,
+                  200,
+                  200
+                ],
+                "sha256": "bc012f635889f889b63fe10667301ba7e7a6b0dc79d954213d53aa03ae6e6e5d"
+              },
+              "labels": {
+                "size": 2528,
+                "dtype": "<i8",
+                "shape": [
+                  300
+                ],
+                "sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d"
+              }
+            },
+            "provenance": {
+              "cpu_export": {
+                "axis": 0,
+                "numpy": "2.1.1",
+                "format": 1,
+                "method": "bilateral",
+                "params": {
+                  "bins": 10000,
+                  "cval": 0,
+                  "mode": "constant",
+                  "win_size": null,
+                  "sigma_color": 0.1,
+                  "channel_axis": null,
+                  "sigma_spatial": 4
+                },
+                "skimage": "0.26.0",
+                "sources": {
+                  "Test": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Test_volumes.npy",
+                    "size": 7200000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      900,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Test_volumes.npy",
+                    "class_counts": {
+                      "0": 411,
+                      "1": 489
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  },
+                  "Training": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Training_volumes.npy",
+                    "size": 16800000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      2100,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Training_volumes.npy",
+                    "class_counts": {
+                      "0": 1017,
+                      "1": 1083
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  },
+                  "Validation": {
+                    "url": "https://huggingface.co/datasets/tqhuyen/harvard-oct-glaucoma-200/resolve/939a38876b7b9313162842ef2d44b7edc2b57020/Validation_volumes.npy",
+                    "size": 2400000128,
+                    "dtype": "uint8",
+                    "shape": [
+                      300,
+                      1,
+                      200,
+                      200,
+                      200
+                    ],
+                    "offset": 128,
+                    "filename": "Validation_volumes.npy",
+                    "class_counts": {
+                      "0": 124,
+                      "1": 176
+                    },
+                    "sample_bytes": 8000000,
+                    "labels_sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d",
+                    "repo_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+                  }
+                },
+                "resolution": 200,
+                "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+                "output_dtype": "uint8",
+                "quantization": "float32 /255 -> filter -> clip *255 -> uint8 truncation",
+                "implementation": "skimage.restoration.denoise_bilateral",
+                "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020",
+                "filter_code_sha256": "635c0131df396438e5ce4baff38fef04e610c964cc2ceb8cccabd2d1a3b59213"
+              },
+              "raw_download": {
+                "sources": {
+                  "Validation": {
+                    "sha256": "bc012f635889f889b63fe10667301ba7e7a6b0dc79d954213d53aa03ae6e6e5d",
+                    "labels_sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d"
+                  }
+                },
+                "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+                "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+              },
+              "views_versions": {
+                "numpy": "2.1.3",
+                "torch": "2.11.0",
+                "manifest": 2,
+                "code_sha256": "89f54d3f2fcd057def86283a6aaf3e08fabe8e6daf29d1c8b5cda06008de5dcf",
+                "views_marker": 1,
+                "denoise_marker": 2
+              }
+            }
+          }
+        }
+      },
+      "seed": 42,
+      "enc2d": "maxvit_tiny_rw_224",
+      "res2d": 224,
+      "res3d": 200,
+      "smoke": false,
+      "stage": "xai",
+      "epochs": 5,
+      "latent": 256,
+      "parent": {
+        "data": [
+          {
+            "size": 16800000128,
+            "sha256": "9fc27d536e4af880fea95ed5e5ba3e92013123c1b0caf830c42ea187612756dd"
+          },
+          {
+            "size": 16928,
+            "sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f"
+          },
+          {
+            "size": 2400000128,
+            "sha256": "bc012f635889f889b63fe10667301ba7e7a6b0dc79d954213d53aa03ae6e6e5d"
+          },
+          {
+            "size": 2528,
+            "sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d"
+          },
+          {
+            "size": 7200000128,
+            "sha256": "d33b1ddd5fa957bff80f1d38ed5d17bdc3c4041f890c2f19b92b88db4eef8fe6"
+          },
+          {
+            "size": 7328,
+            "sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e"
+          }
+        ],
+        "last": {
+          "size": 935089225,
+          "sha256": "a3701f894cb70328de454cc3f4626242921f36ebde1ba91bf5dbd92dc8f696f5"
+        },
+        "path": "/content/drive/MyDrive/MasterBKDN/Thesis/final_2x2d_3d_crossgate/raw_s42_recovered_20260910/raw_s42/best_weights.pt",
+        "metrics": {
+          "size": 2970,
+          "sha256": "dbd5f6fed272029e7ff7317844b0e55b70d63a83fccbce3d3316b3a18a8ab0ae"
+        },
+        "weights": {
+          "size": 233923653,
+          "sha256": "2fbce2d467a71b4cfbe942a4875d5ba4047c72a4eaed0eb7ee9eb51514383b06"
+        },
+        "identity": {
+          "size": 2477,
+          "sha256": "b964c271f50167b07a083acacaa0d01f2daa40b5ca50c0402f13511bb764f08c"
+        },
+        "wandb_id": "enfj8dnn",
+        "phase_status": "completed_marker_present",
+        "source_epoch": 2,
+        "source_val_auc": 0.852662206744868
+      },
+      "compile": false,
+      "dataset": "bilateral",
+      "patience": 5,
+      "train_id": "rkdhqgvh",
+      "amp_dtype": "bfloat16",
+      "store_res": 200,
+      "telemetry": true,
+      "amp_reason": "bf16 supported",
+      "batch_size": 2,
+      "grad_accum": 8,
+      "pin_memory": true,
+      "fused_adamw": false,
+      "num_workers": 0,
+      "non_blocking": true,
+      "step_metrics": true,
+      "weight_decay": 0.0001,
+      "class_weights": [
+        1.0324483775811208,
+        0.969529085872576
+      ],
+      "extend_epochs": 0,
+      "raw_provenance": {
+        "sources": {
+          "Test": {
+            "sha256": "d33b1ddd5fa957bff80f1d38ed5d17bdc3c4041f890c2f19b92b88db4eef8fe6",
+            "labels_sha256": "903a807ef7c3f3894d16db5334f2c7fd51baf572957d2284d099d2142721aa0e"
+          },
+          "Training": {
+            "sha256": "9fc27d536e4af880fea95ed5e5ba3e92013123c1b0caf830c42ea187612756dd",
+            "labels_sha256": "8410930590393e4e0e22e8c02be6d748d8caf15341f6b05a3b99a36640bf293f"
+          },
+          "Validation": {
+            "sha256": "bc012f635889f889b63fe10667301ba7e7a6b0dc79d954213d53aa03ae6e6e5d",
+            "labels_sha256": "00e3ce00f58647f8f47c2fa335130018a34b986e9999cdd83d599fe75cc8601d"
+          }
+        },
+        "source_repo": "tqhuyen/harvard-oct-glaucoma-200",
+        "verification": "HF immutable LFS SHA256 / Git blob plus parent SHA256",
+        "source_revision": "939a38876b7b9313162842ef2d44b7edc2b57020"
+      },
+      "training_phase": "bilateral_finetune5_80gb_v1",
+      "checkpoint_steps": 10,
+      "max_scaler_skips": 3,
+      "preflight_windows": 2,
+      "checkpoint_seconds": 300,
+      "preflight_fraction": 0.85,
+      "tested_timm_version": "1.0.29",
+      "activation_checkpointing": false
+    },
+    "summary": {
+      "stage/artifacts_verified": true,
+      "stage/provenance.branch_drop_first": "zero all 2D inputs, NOT 3D",
+      "stage/provenance.sample": "Validation row 0",
+      "stage/provenance.train_id": "rkdhqgvh",
+      "stage/provenance.weights.sha256": "98fa0ae89087b354791b036c5de24c6d51e7f6af3915bd5a65bf341773ef39fc",
+      "stage/provenance.weights.size": 233923653,
+      "xai/attention_2D-0": 0.5950397849082947,
+      "xai/attention_2D-1": 0.4049602150917053,
+      "xai/drop_2D-0": 0.10517549514770508,
+      "xai/drop_2D-1": 0,
+      "xai/drop_all_2d_inputs": 0.04968893527984619,
+      "xai/gate": 0.615986168384552
+    },
+    "files": {
+      "gradcam2d_0_1_4362a4ee8fb7ecedeca8.png": {
+        "size": 41472,
+        "sha256": "4362a4ee8fb7ecedeca86a75fe71d892bbbe0c0f5504f6295f5ef57e58168ea3"
+      },
+      "gradcam2d_1_2_8fb2dfee218093d9561d.png": {
+        "size": 48313,
+        "sha256": "8fb2dfee218093d9561d393445b45198ddd14f8190b79b88f5b68106f0a86569"
+      },
+      "gradcam3d_0_14344c633d88293c645d.png": {
+        "size": 34604,
+        "sha256": "14344c633d88293c645d9ad0ba336eee87f7a99920cf5f73df4d4ad9e0caef44"
+      },
+      "integrated_gradients_4_1b13d6a60a4ad2700f32.png": {
+        "size": 68121,
+        "sha256": "1b13d6a60a4ad2700f321e543e88939f21923e517ce51a6f355802de3852d60c"
+      },
+      "occlusion_3_893b427716ceaccadd9a.png": {
+        "size": 9373,
+        "sha256": "893b427716ceaccadd9a0ffd176af8930cef35d37a7a509b34f9b6e9140bc85e"
+      }
+    }
+  },
+  "final_bilateral_s42_xai_overlay_reconstruction": {
+    "id": "l4yahq6c",
+    "state": "finished",
+    "url": "https://wandb.ai/quang-huyen/glaucoma-thesis/runs/l4yahq6c",
+    "config": {
+      "bins": 10000,
+      "cval": 0,
+      "mode": "constant",
+      "label": 1,
+      "sample": "Validation row 0",
+      "skimage": "0.26.0",
+      "_wb_agent": {
+        "turn_id": "01a0945b-d8ff-7c21-b383-aad10988f599",
+        "thread_id": "01a09453-09b4-74b1-8fa1-65bada93bac2"
+      },
+      "sigma_color": 0.1,
+      "overlay_alpha": 0.42,
+      "sigma_spatial": 4,
+      "denoise_method": "skimage.restoration.denoise_bilateral",
+      "source_xai_run": "iow9ispv",
+      "dataset_revision": "939a38876b7b9313162842ef2d44b7edc2b57020",
+      "heatmap_recovery": "Recovered from rendered W&B PNG axes; approximate, not original saliency tensors",
+      "source_train_run": "rkdhqgvh",
+      "source_code_commit": "6d564f327b0874e9fc75cba770d2a72afdb73008"
+    },
+    "summary": {
+      "xai_overlay/bilateral_depth_axis": 1,
+      "xai_overlay/bilateral_peak": 23,
+      "xai_overlay/heatmap_tensor_exact": false,
+      "xai_overlay/label": 1,
+      "xai_overlay/raw_depth_axis": 1,
+      "xai_overlay/raw_peak": 23,
+      "xai_overlay/reconstruction_exact_preprocess": true,
+      "xai_overlay/sample": "Validation row 0"
+    },
+    "files": {
+      "contact_sheet_0_ca496e7fd88b8344889b.png": {
+        "size": 4038982,
+        "sha256": "ca496e7fd88b8344889b708230002307e2cafdb28927e38024b3b7629818e6e9"
+      },
+      "grad-cam_2d-0_overlay_1_8ca654fc1270e8960d96.png": {
+        "size": 973380,
+        "sha256": "8ca654fc1270e8960d967a0c3c44321a09c5d26100464bfae1953ac9fdf4543a"
+      },
+      "grad-cam_2d-1_overlay_2_34441f08762ede753e5f.png": {
+        "size": 865454,
+        "sha256": "34441f08762ede753e5fb7acd4e6bb28140d2488e954526b0570dcc392d01e0f"
+      },
+      "grad-cam_3d_overlay_3_d3c73a94ccae232a5be0.png": {
+        "size": 960173,
+        "sha256": "d3c73a94ccae232a5be0ebe1c9418d6c3c9edf584927695b84d49f5f2bb982b4"
+      },
+      "integrated_gradients_overlay_4_140648256a745161ea43.png": {
+        "size": 1005512,
+        "sha256": "140648256a745161ea43679899cfecba0d9e397ce3c9d58ccf874a126a0599e4"
+      },
+      "occlusion_4x4x4_overlay_5_c2ce476961f0dc3a5df4.png": {
+        "size": 857298,
+        "sha256": "c2ce476961f0dc3a5df404c0ea601b16b15151f9c56043911169b71f2a6c8ded"
+      }
+    }
+  }
+}

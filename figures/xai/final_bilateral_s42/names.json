@@ -1,0 +1,17 @@
+{
+  "final_bilateral_s42_xai": {
+    "gradcam2d_0_1_4362a4ee8fb7ecedeca8.png": "01_gradcam_2d-branch0-slab-mip_cam-only_sample-val0-data2101-lbl1.png",
+    "gradcam2d_1_2_8fb2dfee218093d9561d.png": "02_gradcam_2d-branch1-aip-full_cam-only_sample-val0-data2101-lbl1.png",
+    "gradcam3d_0_14344c633d88293c645d.png": "03_gradcam_3d_cam-only_sample-val0-data2101-lbl1.png",
+    "integrated_gradients_4_1b13d6a60a4ad2700f32.png": "04_integrated-gradients_cam-only_sample-val0-data2101-lbl1.png",
+    "occlusion_3_893b427716ceaccadd9a.png": "05_occlusion_4x4x4_cam-only_sample-val0-data2101-lbl1.png"
+  },
+  "final_bilateral_s42_xai_overlay_reconstruction": {
+    "contact_sheet_0_ca496e7fd88b8344889b.png": "00_contact-sheet_all-methods_overlay_sample-val0-data2101-lbl1.png",
+    "grad-cam_2d-0_overlay_1_8ca654fc1270e8960d96.png": "11_gradcam_2d-branch0-slab-mip_overlay_sample-val0-data2101-lbl1.png",
+    "grad-cam_2d-1_overlay_2_34441f08762ede753e5f.png": "12_gradcam_2d-branch1-aip-full_overlay_sample-val0-data2101-lbl1.png",
+    "grad-cam_3d_overlay_3_d3c73a94ccae232a5be0.png": "13_gradcam_3d_overlay_sample-val0-data2101-lbl1.png",
+    "integrated_gradients_overlay_4_140648256a745161ea43.png": "14_integrated-gradients_overlay_sample-val0-data2101-lbl1.png",
+    "occlusion_4x4x4_overlay_5_c2ce476961f0dc3a5df4.png": "15_occlusion_4x4x4_overlay_sample-val0-data2101-lbl1.png"
+  }
+}
