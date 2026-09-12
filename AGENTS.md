@@ -101,6 +101,18 @@ harvardairobotics/Harvard-GF (HF, per-scan .npz 'oct_bscans' 200³ uint8)
 - Cache/reuse processed data (views, denoise, heavy augmentation); per case decide
   whether it is worth uploading to a **versioned HF dataset repo** (method + params
   + implementation hash) so later runs skip recompute — ask before uploading.
+- **Persisted Bilateral-96 storage** (approved exception to "never persist downsampled"):
+  private HF dataset `tqhuyen/harvard-oct-glaucoma-200-bilateral-96` rev
+  `7b528ec4c72e63bfc3394d185911e75c3f323813` (superseded first commit `4372a41f…` was empty).
+  Files per split: `{split}_volumes_dn96.npy` (uint8, 96³), `{split}_labels.npy`,
+  `{split}_complete.json`, plus `manifest.json` (shapes + SHA256 + provenance). It is derived
+  from the Bilateral-200 export (`tqhuyen/harvard-oct-glaucoma-200-bilateral` rev
+  `47632c96b206707fd6423ee5b4da159069f63eaf`) by float32 `/255` → trilinear
+  `align_corners=False` → round/clip uint8, and is **bit-identical** to `FinalDataset`'s
+  on-the-fly resize (verified). Use it only to feed the 3D branch; 2D en-face views must still
+  be projected from the 200-cubed source. Rebuild/re-upload with
+  `python scripts/make_bilateral_96.py [--upload]` and `HF_XET_HIGH_PERFORMANCE=1`; download
+  selectively with `HF_TOKEN` + `allow_patterns`.
 - mmap stored volumes; on Windows use `num_workers=0` (mmap + multiprocessing can segfault).
 
 ### Training flow (pipeline/train.py)
