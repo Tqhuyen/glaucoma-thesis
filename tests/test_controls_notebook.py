@@ -216,7 +216,7 @@ def test_epoch_timer_partial_resume(namespace, capsys):
     assert "epoch 4" in capsys.readouterr().out
 
 
-def test_full_offline_six_spec_smoke(tmp_path):
+def test_full_offline_seven_spec_smoke(tmp_path):
     env = {key: value for key, value in os.environ.items() if not key.startswith(("CTRL_", "WANDB_", "HF_"))}
     env.update(CTRL_SMOKE="1", WANDB_MODE="offline", WANDB_SILENT="true", PYTHONIOENCODING="utf-8")
     env["PYTHONPATH"] = str(NOTEBOOK.parents[1])
@@ -229,7 +229,7 @@ def test_full_offline_six_spec_smoke(tmp_path):
         timeout=180,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "CONTROLS SIX-SPEC SMOKE OK" in result.stdout
+    assert "CONTROLS SEVEN-SPEC SMOKE OK" in result.stdout
 
 
 def offline_smoke(root):
@@ -292,20 +292,21 @@ def offline_smoke(root):
     ct.Trainer.fit, ft.predict, ct.calibrated_report = fit, predict, report
     for source in code_cells():
         exec(compile(source, "<controls-cell>", "exec"), ns)
-    assert set(ns["RESULTS"]) == {f"{code}_s42" for code in ("P", "B1", "B2", "B3", "C1", "C2")}
-    assert epochs == [1] * 6
+    assert set(ns["RESULTS"]) == {f"{code}_s42" for code in ("P", "B1", "B2", "B3", "C1", "C2", "B4")}
+    assert epochs == [1] * 7
     assert ns["progress"]["trainer"] is ns["ACTIVE_TRAINER"] is ns["ACTIVE_MODEL"] is None
-    assert len(runs) == 7 and all(run._is_finished for run in runs)
+    assert len(runs) == 8 and all(run._is_finished for run in runs)
     summary = json.loads((ns["STORAGE"].local / "controls_96_summary.json").read_text())
-    assert len(summary) == 6
+    assert len(summary) == 7
     assert all(item["n_seeds"] == 1 for item in summary.values())
     for tag in ns["RESULTS"]:
         assert (ns["LOCAL_ROOT"] / tag / "completed.pt").is_file()
+    assert (ns["LOCAL_ROOT"] / "B4_s42" / "run_identity.pt").is_file()
     ns["RESUME"] = True
     ft.find_batch_size = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("Completed run re-probed"))
     exec(cell("RESULTS = {}"), ns)
-    assert len(runs) == 7
-    print("CONTROLS SIX-SPEC SMOKE OK")
+    assert len(runs) == 8
+    print("CONTROLS SEVEN-SPEC SMOKE OK")
 
 
 if __name__ == "__main__":
