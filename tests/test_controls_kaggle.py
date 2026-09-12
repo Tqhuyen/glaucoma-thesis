@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -33,7 +34,7 @@ def cfg(tmp_path, monkeypatch):
 
 
 def prepared(cfg):
-    sources = {kind: kd.prepare_source(cfg, kind) for kind in ("raw", "bilateral")}
+    sources = {kind: kd.prepare_source(cfg, kind) for kind in ("raw", "bilateral", "bm3d")}
     kd.verify_bilateral(sources["raw"], sources["bilateral"], smoke=True)
     return {kind: kd.prepare_views(cfg, source) for kind, source in sources.items()}
 
@@ -129,23 +130,67 @@ def fake_cloud(monkeypatch, sources, calls):
 def test_plan_and_frozen_defaults(monkeypatch):
     monkeypatch.delenv("CTRL_KAGGLE_SMOKE", raising=False)
     cfg = kg.default_config()
-    assert len(kg.jobs(cfg)) == len({job[2] for job in kg.jobs(cfg)}) == 21
+    assert len(kg.jobs(cfg)) == len({job[2] for job in kg.jobs(cfg)}) == 16
+    assert [job[2] for job in kg.jobs(cfg)] == [
+        "P_s42",
+        "P_s43",
+        "P_s44",
+        "B3_s44",
+        "C1_s42",
+        "C1_s43",
+        "C1_s44",
+        "C2_s42",
+        "C2_s43",
+        "C2_s44",
+        "B4_s42",
+        "B4_s43",
+        "B4_s44",
+        "BM_s42",
+        "BM_s43",
+        "BM_s44",
+    ]
     assert (cfg["epochs"], cfg["patience"], cfg["max_runs_per_session"], cfg["session_hours"]) == (20, 21, 2, 10)
     assert cfg["seeds"] == [42, 43, 44]
     assert cfg["effective_batch"] == 16
     assert cfg["store_res"] == 200 and cfg["res3d"] == 96 and cfg["res2d"] == 224
-    assert [(s["code"], s["use_3d"], s["n_2d"], s["view_indices"], s["fusion"], s["gate_fixed"]) for s in kg.SPECS] == [
+    assert cfg["bm3d_root"] == ""
+    assert [
+        (s["code"], s["use_3d"], s["n_2d"], list(s["view_indices"]), s["fusion"], s["gate_fixed"]) for s in kg.SPECS
+    ] == [
         ("P", True, 2, [0, 1], "crossgate", False),
-        ("B1", True, 1, [0], "crossgate", False),
-        ("B2", True, 1, [1], "crossgate", False),
         ("B3", False, 2, [0, 1], "concat", False),
         ("C1", True, 2, [0, 1], "concat", False),
         ("C2", True, 2, [0, 1], "crossgate", True),
         ("B4", True, 2, [0, 1], "crossgate", False),
+        ("BM", True, 2, [0, 1], "crossgate", False),
     ]
+    assert [s.get("dataset", "raw") for s in kg.SPECS] == ["raw", "raw", "raw", "raw", "bilateral", "bm3d"]
+    assert [s.get("seeds") for s in kg.SPECS if s["code"] == "B3"] == [(44,)]
+    assert "B1" not in {s["code"] for s in kg.SPECS} and "B2" not in {s["code"] for s in kg.SPECS}
     assert kg.jobs({**cfg, "run_target": "B4_s44"})[0][2] == "B4_s44"
+    assert kg.jobs({**cfg, "run_target": "B3_s44"})[0][2] == "B3_s44"
     with pytest.raises(ValueError, match="RUN_TARGET"):
         kg.jobs({**cfg, "run_target": "B4"})
+    with pytest.raises(ValueError, match="RUN_TARGET"):
+        kg.jobs({**cfg, "run_target": "B3_s42"})
+    with pytest.raises(ValueError, match="RUN_TARGET"):
+        kg.jobs({**cfg, "run_target": "B1_s42"})
+
+
+def test_config_rejects_unauthorized_spec_change(monkeypatch):
+    monkeypatch.delenv("CTRL_KAGGLE_SMOKE", raising=False)
+    cfg = kg.default_config()
+    original = kg.SPECS
+    tampered = copy.deepcopy(original)
+    tampered[0]["fusion"] = "concat"
+    monkeypatch.setattr(kg, "SPECS", tampered)
+    with pytest.raises(ValueError, match="specification set"):
+        kg.validate_config(cfg)
+    tampered = copy.deepcopy(original)
+    tampered[1]["seeds"] = (42, 43, 44)
+    monkeypatch.setattr(kg, "SPECS", tampered)
+    with pytest.raises(ValueError, match="seed override"):
+        kg.validate_config(cfg)
 
 
 def test_gpu_detection_and_env(monkeypatch):
@@ -291,7 +336,7 @@ def test_readonly_views_identity_and_augmentation(cfg, monkeypatch):
         actual, actual_views, _ = dataset[0]
         np.testing.assert_array_equal(actual.numpy()[0], volume.astype(np.float32) / 255)
         np.testing.assert_array_equal(actual_views.numpy()[:, 0], views.astype(np.float32) / 255)
-        b3 = kd.make_datasets(sources, kg.SPECS[3], 42, smoke=True)[0]
+        b3 = kd.make_datasets(sources, next(spec for spec in kg.SPECS if spec["code"] == "B3"), 42, smoke=True)[0]
         assert b3.volumes is None
         assert b3[0][0].shape == (1, 1, 1, 1)
         identity = json.dumps(entry["identity"])
@@ -502,6 +547,13 @@ def test_batch_one_stop_resume_without_probe(cfg, monkeypatch):
     kg.worker(baseline_cfg, data, "P_s42", deadline=float("inf"), stop_path=stop)
     baseline_path = Path(baseline_cfg["output_root"]) / cfg["group"] / "P_s42" / "last.pt"
     baseline = torch.load(baseline_path, weights_only=False)
+    assert resumed["scheduler"] == baseline["scheduler"]
+    assert resumed["optimizer"]["param_groups"][0]["lr"] == baseline["optimizer"]["param_groups"][0]["lr"]
+    resumed_steps = [json.loads(line) for line in (local / "steps.jsonl").read_text().splitlines()]
+    baseline_steps = [json.loads(line) for line in baseline_path.with_name("steps.jsonl").read_text().splitlines()]
+    resumed_lr = [row["train/lr"] for row in resumed_steps if "train/lr" in row]
+    baseline_lr = [row["train/lr"] for row in baseline_steps if "train/lr" in row]
+    assert len(resumed_lr) == 2 and resumed_lr == baseline_lr
     for key, value in resumed["model"].items():
         torch.testing.assert_close(value, baseline["model"][key], rtol=0, atol=0)
 
@@ -524,15 +576,15 @@ def test_hydrate_only_target_no_input_writes(cfg, tmp_path):
     source = tmp_path / "attached"
     data = prepared(cfg)
     bundle(cfg, data, source / "P_s42")
-    (source / "B1_s42").mkdir()
+    (source / "C1_s42").mkdir()
     (source / "P_s42" / "Training_volumes.npy").write_bytes(b"never-copy")
-    (source / "B1_s42" / "last.pt").write_bytes(b"other-run")
+    (source / "C1_s42" / "last.pt").write_bytes(b"other-run")
     cfg["resume_root"] = str(source)
     before = {p: p.read_bytes() for p in source.rglob("*") if p.is_file()}
     local = kg.hydrate(cfg, "P_s42")
     assert (local / "last.pt").is_file() and (local / "hydrated.json").is_file()
     assert not (local / "Training_volumes.npy").exists()
-    assert not (local.parent / "B1_s42").exists()
+    assert not (local.parent / "C1_s42").exists()
     assert all(path.read_bytes() == value for path, value in before.items())
 
 
@@ -567,7 +619,7 @@ def test_dispatch_two_distinct_workers_budget_and_owned_stop(cfg, monkeypatch):
 
     monkeypatch.setattr(kg.subprocess, "Popen", Child)
     dispatched = kg.dispatch(cfg, {})
-    assert dispatched == ["P_s42", "B1_s42"]
+    assert dispatched == [job[2] for job in kg.jobs({**cfg, "run_target": ""})][:2]
     assert len(calls) == 2
     assert {kwargs["env"]["CUDA_VISIBLE_DEVICES"] for _, kwargs in calls} == {"0", "1"}
     assert not kg.OWNED_CHILDREN
@@ -598,6 +650,187 @@ def test_partial_summary(cfg):
     summary = kg.aggregate(cfg)["summary"]["P"]
     assert summary["n_seeds"] == 1 and summary["partial"]
     assert summary["metrics"]["auc_roc"] == {"mean": 0.75, "std": None, "n": 1}
+
+
+def test_aggregate_uses_per_spec_seeds(cfg):
+    root = Path(cfg["output_root"]) / cfg["group"]
+    bundle(cfg, prepared(cfg), root / "B3_s44", tag="B3_s44", completed=True)
+    summary = kg.aggregate(cfg)["summary"]
+    assert summary["B3"]["n_seeds"] == 1 and summary["B3"]["partial"] is True
+    assert summary["B3"]["metrics"]["auc_roc"] == {"mean": 0.75, "std": None, "n": 1}
+    assert summary["P"]["n_seeds"] == 0 and summary["BM"]["n_seeds"] == 0
+
+
+def test_make_model_passes_only_model_kwargs(cfg, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(kg.cm, "ControlsModel", lambda **kwargs: captured.update(kwargs) or SimpleNamespace())
+    spec = dict(
+        code="BM",
+        label="BM3D 200 -> 96 full model",
+        use_3d=True,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="crossgate",
+        gate_fixed=False,
+        dataset="bm3d",
+        seeds=(44,),
+    )
+    kg.make_model(spec, smoke=False)
+    assert set(captured) == {
+        "use_3d",
+        "n_2d",
+        "view_indices",
+        "fusion",
+        "gate_fixed",
+        "D",
+        "enc2d",
+        "enc3d_features",
+        "enc2d_pretrained",
+    }
+    assert captured["use_3d"] is True and captured["enc2d_pretrained"] is True
+
+
+def test_make_datasets_routes_by_dataset(cfg):
+    data = prepared(cfg)
+    bm = next(spec for spec in kg.SPECS if spec["code"] == "BM")
+    b3 = next(spec for spec in kg.SPECS if spec["code"] == "B3")
+    bm_dataset = kd.make_datasets(data, bm, 42, smoke=True)[0]
+    assert bm_dataset.source == Path(data["bm3d"]["entries"]["Training"]["source"])
+    assert bm_dataset.use_3d is True and bm_dataset.volumes is not None
+    assert kd.make_datasets(data, b3, 44, smoke=True)[0].volumes is None
+    assert kg.training_config(cfg, data, bm, 42, bm_dataset)["dataset"] == "bm3d"
+
+
+def _bm3d_remote(tmp_path):
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    shards = {
+        "Training": [np.full((1, 200, 200, 200), 1, np.uint8), np.full((1, 200, 200, 200), 2, np.uint8)],
+        "Validation": [np.full((2, 200, 200, 200), 3, np.uint8)],
+        "Test": [np.full((2, 200, 200, 200), 4, np.uint8)],
+    }
+    labels = {"Training": [0, 1], "Validation": [1, 0], "Test": [0, 1]}
+    for split, arrays in shards.items():
+        for index, array in enumerate(arrays):
+            path = remote / kd.BM3D_PREFIX / "volumes" / split / f"shard-{index:05d}.npy"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(path, array)
+        np.save(remote / f"{split}_labels.npy", np.array(labels[split], dtype=np.int64))
+    (remote / kd.BM3D_PREFIX / "_COMPLETE.json").write_text(json.dumps({"complete": True}))
+    return remote
+
+
+def _bm3d_siblings(remote, subdir):
+    items = []
+    for path in sorted(remote.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.relative_to(remote).as_posix()
+        if (subdir and not name.startswith(subdir + "/")) or (not subdir and "/" in name):
+            continue
+        items.append(
+            SimpleNamespace(rfilename=name, size=path.stat().st_size, lfs={"sha256": kd.sha256(path)}, blob_id=None)
+        )
+    return items
+
+
+def _copy_allowed(remote, kwargs):
+    local = Path(kwargs["local_dir"])
+    for name in kwargs["allow_patterns"]:
+        source, target = remote / name, local / name
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+
+
+def _install_bm3d_hf(remote, monkeypatch, *, corrupt=None):
+    import huggingface_hub
+
+    def info(repo, revision=None, files_metadata=False):
+        if repo == kd.BM3D_REPO:
+            siblings = _bm3d_siblings(remote, kd.BM3D_PREFIX)
+        elif repo == kd.RAW_REPO:
+            assert revision == kd.RAW_REVISION
+            siblings = _bm3d_siblings(remote, "")
+        else:
+            raise AssertionError(repo)
+        for item in siblings:
+            if corrupt and item.rfilename in corrupt:
+                item.lfs = {"sha256": corrupt[item.rfilename]}
+        return SimpleNamespace(sha=revision or "bm3d-main", siblings=siblings)
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda token=None: SimpleNamespace(dataset_info=info))
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kwargs: _copy_allowed(remote, kwargs))
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+
+
+def test_bm3d_prepare_source_shards_identity_and_resumable(cfg, tmp_path, monkeypatch):
+    remote = _bm3d_remote(tmp_path)
+    _install_bm3d_hf(remote, monkeypatch)
+    cfg["smoke"] = False
+    source = kd.prepare_source(cfg, "bm3d")
+    assert set(source["entries"]) == set(kd.SPLITS)
+    training = np.load(source["entries"]["Training"]["source"], mmap_mode="r")
+    assert training.shape == (2, 200, 200, 200) and training.dtype == np.uint8
+    assert int(training[0, 0, 0, 0]) == 1 and int(training[1, 0, 0, 0]) == 2
+    identity = source["entries"]["Training"]["identity"]
+    assert identity["repo"] == kd.BM3D_REPO and identity["prefix"] == kd.BM3D_PREFIX
+    assert identity["shape"] == [2, 200, 200, 200]
+    assert re.fullmatch(r"[0-9a-f]{64}", identity["volumes"])
+    assert cfg["temp_root"] not in json.dumps(identity)
+    shard_dir = Path(cfg["temp_root"]) / "bm3d" / kd.BM3D_PREFIX / "volumes" / "Training"
+    assert not list(shard_dir.glob("*.npy"))
+    import huggingface_hub
+
+    monkeypatch.setattr(
+        huggingface_hub, "snapshot_download", lambda **kwargs: pytest.fail("Resumable must not download")
+    )
+    again = kd.prepare_source(cfg, "bm3d")
+    assert again["entries"]["Training"]["identity"] == identity
+
+
+def test_bm3d_prepare_source_rejects_sha_and_count_mismatch(cfg, tmp_path, monkeypatch):
+    remote = _bm3d_remote(tmp_path)
+    cfg["smoke"] = False
+    shard = f"{kd.BM3D_PREFIX}/volumes/Training/shard-00000.npy"
+    _install_bm3d_hf(remote, monkeypatch, corrupt={shard: "0" * 64})
+    with pytest.raises(ValueError, match="checksum"):
+        kd.prepare_source(cfg, "bm3d")
+    shutil.rmtree(Path(cfg["temp_root"]), ignore_errors=True)
+    np.save(remote / "Validation_labels.npy", np.array([1, 0, 0], dtype=np.int64))
+    _install_bm3d_hf(remote, monkeypatch)
+    with pytest.raises(ValueError, match="label|volumes"):
+        kd.prepare_source(cfg, "bm3d")
+
+
+def test_bm3d_disk_preflight_before_download(cfg, tmp_path, monkeypatch):
+    remote = _bm3d_remote(tmp_path)
+    _install_bm3d_hf(remote, monkeypatch)
+    cfg["smoke"] = False
+    monkeypatch.setattr(kd.shutil, "disk_usage", lambda path: SimpleNamespace(free=1))
+    with pytest.raises(OSError, match="Insufficient disk"):
+        kd.prepare_source(cfg, "bm3d")
+
+
+def test_bm3d_attached_root_never_written(cfg, tmp_path, monkeypatch):
+    remote = _bm3d_remote(tmp_path)
+    _install_bm3d_hf(remote, monkeypatch)
+    root = tmp_path / "attached_bm3d"
+    root.mkdir()
+    counts = {"Training": 2, "Validation": 2, "Test": 2}
+    for split in kd.SPLITS:
+        np.save(root / f"{split}_volumes.npy", np.zeros((counts[split], 200, 200, 200), np.uint8))
+        np.save(root / f"{split}_labels.npy", np.load(remote / f"{split}_labels.npy"))
+    cfg.update(smoke=False, bm3d_root=str(root))
+    before = {p: p.stat().st_mtime_ns for p in root.iterdir()}
+    source = kd.prepare_source(cfg, "bm3d")
+    assert set(source["entries"]) == set(kd.SPLITS)
+    assert {p: p.stat().st_mtime_ns for p in root.iterdir()} == before
+    cfg["bm3d_root"] = str(tmp_path / "missing_bm3d")
+    (tmp_path / "missing_bm3d").mkdir()
+    with pytest.raises((FileNotFoundError, ValueError)):
+        kd.prepare_source(cfg, "bm3d")
 
 
 @pytest.mark.parametrize("damage", ["missing", "empty", "identity", "last", "truncated"])
@@ -759,7 +992,7 @@ def test_completed_skip_and_aggregate_require_provenance(cfg, tmp_path, monkeypa
     bundle(cfg, data, local, completed=True)
     record = json.loads((local / "completed.json").read_text())
     if damage == "tag":
-        record["tag"] = "B1_s42"
+        record["tag"] = "C1_s42"
     elif damage == "seed":
         record["identity"]["config"]["seed"] = 43
     elif damage == "run-id":
@@ -781,8 +1014,9 @@ def test_completed_skip_and_aggregate_require_provenance(cfg, tmp_path, monkeypa
 def test_cloud_completed_refs_are_resolved_before_cap(cfg, tmp_path, monkeypatch):
     cfg["max_runs_per_session"] = 2
     data = prepared(cfg)
+    completed_tags = ["P_s42", "C1_s42"]
     sources = {}
-    for tag in ("P_s42", "B1_s42"):
+    for tag in completed_tags:
         source = tmp_path / f"cloud-{tag}"
         bundle(cfg, data, source, tag, completed=True)
         sources[tag] = source
@@ -790,19 +1024,21 @@ def test_cloud_completed_refs_are_resolved_before_cap(cfg, tmp_path, monkeypatch
     calls = []
     fake_cloud(monkeypatch, sources, calls)
     selected, _ = kg.session_jobs(cfg, data)
-    assert [tag for _, _, tag in selected] == ["B2_s42", "B3_s42"]
+    expected = [job[2] for job in kg.jobs({**cfg, "run_target": ""}) if job[2] not in completed_tags][:2]
+    assert [tag for _, _, tag in selected] == expected
     assert all(name in {"recovery.json", "run_identity.json", "completed.json"} for _, name in calls)
     assert not list((Path(cfg["output_root"]) / cfg["group"]).glob("*/last.pt"))
     summary = kg.aggregate(cfg, data)
-    assert set(summary["runs"]) == {"P_s42", "B1_s42"}
-    assert summary["summary"]["P"]["n_seeds"] == 1
+    assert set(summary["runs"]) == set(completed_tags)
+    assert summary["summary"]["P"]["n_seeds"] == 1 and summary["summary"]["C1"]["n_seeds"] == 1
 
 
 def test_two_gpu_dispatch_refills_after_cloud_completions(cfg, tmp_path, monkeypatch):
     data = prepared(cfg)
     cfg.update(smoke=False, max_runs_per_session=2)
+    completed_tags = ["P_s42", "C1_s42"]
     sources = {}
-    for tag in ("P_s42", "B1_s42"):
+    for tag in completed_tags:
         sources[tag] = tmp_path / tag
         bundle(cfg, data, sources[tag], tag, completed=True)
     cfg["artifact_refs"] = {tag: tag for tag in sources}
@@ -828,7 +1064,8 @@ def test_two_gpu_dispatch_refills_after_cloud_completions(cfg, tmp_path, monkeyp
             return 0
 
     monkeypatch.setattr(kg.subprocess, "Popen", Child)
-    assert kg.dispatch(cfg, data) == ["B2_s42", "B3_s42"]
+    expected = [job[2] for job in kg.jobs({**cfg, "run_target": ""}) if job[2] not in completed_tags][:2]
+    assert kg.dispatch(cfg, data) == expected
     assert {env["CUDA_VISIBLE_DEVICES"] for _, env in launches} == {"0", "1"}
     assert len(launches) == 2 and not kg.OWNED_CHILDREN
     assert all(name != "last.pt" for _, name in downloads)
@@ -989,10 +1226,15 @@ def test_full_notebook_cpu_smoke(tmp_path):
         PYTHONPATH=str(ROOT),
     )
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve())], env=env, cwd=ROOT, text=True, capture_output=True, timeout=240
+        [sys.executable, str(Path(__file__).resolve())],
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=240,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "KAGGLE SEVEN-SPEC SMOKE OK" in result.stdout
+    assert "KAGGLE SIX-SPEC SMOKE OK" in result.stdout
 
 
 def offline_smoke():
@@ -1005,16 +1247,25 @@ def offline_smoke():
 
     huggingface_hub.snapshot_download = huggingface_hub.hf_hub_download = forbidden
     torch.cuda.init = forbidden
+    kg.ks.subprocess.run = forbidden
+    original_bootstrap = kg.ks.bootstrap
+
+    def bootstrap(**kwargs):
+        assert kwargs["smoke"]
+        return original_bootstrap(**kwargs)
+
+    kg.ks.bootstrap = bootstrap
     namespace = {"__name__": "kaggle_smoke"}
     notebook = json.loads(NOTEBOOK.read_text())
     for cell in notebook["cells"]:
         if cell["cell_type"] == "code":
             exec(compile("".join(cell["source"]), "<kaggle-cell>", "exec"), namespace)
     cfg = namespace["CFG"]
-    assert len(namespace["DISPATCHED"]) == 7
+    job_tags = [job[2] for job in kg.jobs(cfg)]
+    assert len(namespace["DISPATCHED"]) == len(job_tags)
     root = Path(cfg["output_root"]) / cfg["group"]
-    for spec in kg.SPECS:
-        local = root / f"{spec['code']}_s42"
+    for tag in job_tags:
+        local = root / tag
         assert (local / "completed.json").is_file()
         state = torch.load(local / "last.pt", map_location="cpu", weights_only=False)
         assert state["epoch"] == 1
@@ -1026,7 +1277,37 @@ def offline_smoke():
     kg.probe_batch = forbidden
     assert kg.dispatch(cfg, namespace["PREPARED"]) == []
     assert all(item["n_seeds"] == 1 for item in namespace["SUMMARY"]["summary"].values())
-    print("KAGGLE SEVEN-SPEC SMOKE OK")
+    assert set(namespace["SUMMARY"]["summary"]) == {"P", "B3", "C1", "C2", "B4", "BM"}
+    print("KAGGLE SIX-SPEC SMOKE OK")
+
+
+@pytest.mark.parametrize("existing", ["HF_TOKEN", "WANDB_API_KEY", None])
+def test_secrets_independent_fallback(monkeypatch, existing):
+    monkeypatch.setattr(kg.ft, "load_env_file", lambda: None)
+    for key in ("HF_TOKEN", "WANDB_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    if existing:
+        monkeypatch.setenv(existing, "already-present")
+    calls = []
+
+    def get_secret(key):
+        calls.append(key)
+        if existing is None and key == "HF_TOKEN":
+            raise RuntimeError("unavailable")
+        return "from-secret"
+
+    monkeypatch.setitem(
+        sys.modules, "kaggle_secrets", SimpleNamespace(UserSecretsClient=lambda: SimpleNamespace(get_secret=get_secret))
+    )
+    if existing is None:
+        with pytest.raises(RuntimeError, match="HF_TOKEN"):
+            kg.load_credentials()
+        assert calls == ["HF_TOKEN", "WANDB_API_KEY"]
+        assert os.environ["WANDB_API_KEY"] == "from-secret"
+    else:
+        kg.load_credentials()
+        assert calls == [key for key in ("HF_TOKEN", "WANDB_API_KEY") if key != existing]
+        assert os.environ[existing] == "already-present"
 
 
 if __name__ == "__main__":

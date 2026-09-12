@@ -21,6 +21,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from scripts import controls_kaggle_setup as ks
+
+ks.require_ready(smoke=os.environ.get("CTRL_KAGGLE_SMOKE", "0") == "1", importing=True)
+if __name__ == "__main__":
+    sys.stdout = ks.RedactedOutput(sys.stdout)
+    sys.stderr = ks.RedactedOutput(sys.stderr)
+
 import numpy as np
 import torch
 
@@ -31,26 +38,95 @@ from scripts import final_model as fm
 from scripts import final_training as ft
 from scripts.controls_kaggle_data import make_datasets, require_disk, run_lock, sha256, write_json
 
+ks.record_imports()
+
+ACTIVE_CODES = ("P", "B3", "C1", "C2", "B4", "BM")
 SPECS = [
     dict(
-        code=code,
-        use_3d=code != "B3",
-        n_2d=len(views),
-        view_indices=views,
-        fusion="concat" if code in ("B3", "C1") else "crossgate",
-        gate_fixed=code == "C2",
-    )
-    for code, views in (
-        ("P", [0, 1]),
-        ("B1", [0]),
-        ("B2", [1]),
-        ("B3", [0, 1]),
-        ("C1", [0, 1]),
-        ("C2", [0, 1]),
-        ("B4", [0, 1]),
-    )
+        code="P",
+        label="3 branches + CrossGate",
+        use_3d=True,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="crossgate",
+        gate_fixed=False,
+        dataset="raw",
+    ),
+    # B1/B2 disabled from the active protocol run list; retained here as documented variants only.
+    # dict(
+    #     code="B1",
+    #     label="ResNeXt3D + slab_mip",
+    #     use_3d=True,
+    #     n_2d=1,
+    #     view_indices=(0,),
+    #     fusion="crossgate",
+    #     gate_fixed=False,
+    #     dataset="raw",
+    # ),
+    # dict(
+    #     code="B2",
+    #     label="ResNeXt3D + aip_full",
+    #     use_3d=True,
+    #     n_2d=1,
+    #     view_indices=(1,),
+    #     fusion="crossgate",
+    #     gate_fixed=False,
+    #     dataset="raw",
+    # ),
+    dict(
+        code="B3",
+        label="2D-only + concat",
+        use_3d=False,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="concat",
+        gate_fixed=False,
+        dataset="raw",
+        seeds=(44,),
+    ),
+    dict(
+        code="C1",
+        label="3 branches + concat",
+        use_3d=True,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="concat",
+        gate_fixed=False,
+        dataset="raw",
+    ),
+    dict(
+        code="C2",
+        label="3 branches + attention gate=1",
+        use_3d=True,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="crossgate",
+        gate_fixed=True,
+        dataset="raw",
+    ),
+    dict(
+        code="B4",
+        label="Bilateral 200 -> 96 full model",
+        use_3d=True,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="crossgate",
+        gate_fixed=False,
+        dataset="bilateral",
+    ),
+    dict(
+        code="BM",
+        label="BM3D 200 -> 96 full model",
+        use_3d=True,
+        n_2d=2,
+        view_indices=(0, 1),
+        fusion="crossgate",
+        gate_fixed=False,
+        dataset="bm3d",
+    ),
 ]
 OWNED_CHILDREN = {}
+OWNED_LOGS = {}
 RECOVERY_FILES = {
     "run_identity.pt",
     "run_identity.json",
@@ -78,6 +154,7 @@ def default_config():
         "temp_root": os.environ.get("CTRL_KAGGLE_TEMP_ROOT", str(root / "temp" / "controls96")),
         "raw_root": os.environ.get("CTRL_KAGGLE_RAW_ROOT", ""),
         "bilateral_root": os.environ.get("CTRL_KAGGLE_BILATERAL_ROOT", ""),
+        "bm3d_root": os.environ.get("CTRL_KAGGLE_BM3D_ROOT", ""),
         "resume_root": os.environ.get("CTRL_KAGGLE_RESUME_ROOT", ""),
         "artifact_refs": {},
         "allow_initialized_recovery": False,
@@ -106,6 +183,7 @@ def default_config():
 
 
 def validate_config(cfg):
+    ks.require_ready(smoke=cfg["smoke"])
     pending = [cfg]
     while pending:
         value = pending.pop()
@@ -123,6 +201,34 @@ def validate_config(cfg):
     )
     if any(cfg[k] != v for k, v in frozen.items()):
         raise ValueError("Frozen study changed; this adapter does not authorize another protocol")
+    authorized = {
+        "P": (True, 2, (0, 1), "crossgate", False, "raw"),
+        "B3": (False, 2, (0, 1), "concat", False, "raw"),
+        "C1": (True, 2, (0, 1), "concat", False, "raw"),
+        "C2": (True, 2, (0, 1), "crossgate", True, "raw"),
+        "B4": (True, 2, (0, 1), "crossgate", False, "bilateral"),
+        "BM": (True, 2, (0, 1), "crossgate", False, "bm3d"),
+    }
+    if (
+        tuple(spec["code"] for spec in SPECS) != ACTIVE_CODES
+        or {
+            spec["code"]: (
+                spec["use_3d"],
+                spec["n_2d"],
+                tuple(spec["view_indices"]),
+                spec["fusion"],
+                spec["gate_fixed"],
+                spec.get("dataset", "raw"),
+            )
+            for spec in SPECS
+        }
+        != authorized
+    ):
+        raise ValueError("Active specification set changed; this adapter does not authorize another protocol")
+    for spec in SPECS:
+        expected_seeds = (44,) if spec["code"] == "B3" else tuple(cfg["seeds"])
+        if tuple(spec.get("seeds", cfg["seeds"])) != expected_seeds:
+            raise ValueError("Per-spec seed override changed; this adapter does not authorize another protocol")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", cfg["group"]):
         raise ValueError("Use a simple group name")
     cap = cfg["max_runs_per_session"]
@@ -154,37 +260,31 @@ def load_credentials(*, smoke=False):
     ft.load_env_file()
     if smoke:
         return
+    missing = []
     for key in ("HF_TOKEN", "WANDB_API_KEY"):
         if not os.environ.get(key):
             try:
                 from kaggle_secrets import UserSecretsClient
 
                 os.environ[key] = UserSecretsClient().get_secret(key)
-            except Exception as exc:
-                raise RuntimeError(f"Enable Kaggle Internet and attach Kaggle Secret {key}") from exc
+            except Exception:
+                pass
         if not os.environ.get(key):
-            raise RuntimeError(f"Missing {key}")
+            missing.append(key)
+    if missing:
+        raise RuntimeError(f"Enable Kaggle Internet and attach missing Kaggle Secrets: {', '.join(missing)}")
     os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 
 
 def configure_runtime(cfg):
-    root = Path(cfg["temp_root"])
-    root.mkdir(parents=True, exist_ok=True)
+    ks.require_ready(smoke=cfg["smoke"])
+    ks.configure_caches(cfg)
+    Path(cfg["temp_root"]).mkdir(parents=True, exist_ok=True)
     Path(cfg["output_root"]).mkdir(parents=True, exist_ok=True)
-    for key, relative in {
-        "HF_HOME": "hf",
-        "HF_HUB_CACHE": "hf/hub",
-        "HF_XET_CACHE": "hf/xet",
-        "TORCH_HOME": "torch",
-        "WANDB_CACHE_DIR": "wandb-cache",
-        "WANDB_DATA_DIR": "wandb-staging",
-    }.items():
-        os.environ[key] = str(root / relative)
-    os.environ["HF_XET_CHUNK_CACHE_SIZE_BYTES"] = "0"
 
 
 def jobs(cfg):
-    plan = [(spec, seed, f"{spec['code']}_s{seed}") for spec in SPECS for seed in cfg["seeds"]]
+    plan = [(spec, seed, f"{spec['code']}_s{seed}") for spec in SPECS for seed in spec.get("seeds", cfg["seeds"])]
     if cfg["run_target"]:
         plan = [job for job in plan if job[2] == cfg["run_target"]]
         if not plan:
@@ -243,6 +343,7 @@ class KaggleArtifacts:
         artifact = wandb.Artifact(f"controls-{self.run.id}", type="checkpoint", metadata={"stage": stage})
         write_json(self.local / "recovery.json", recovery_descriptor(self.local, stage))
         names = sorted(RECOVERY_FILES | {"recovery.json"})
+        print(f"[checkpoint] upload start {stage}: full state from {self.local}", flush=True)
         for name in names:
             if (self.local / name).is_file():
                 artifact.add_file(str(self.local / name), name=name)
@@ -252,11 +353,12 @@ class KaggleArtifacts:
         except Exception as exc:
             raise RuntimeError("W&B checkpoint FAILED; local checkpoint retained; stop this session") from exc
         write_json(self.local / "archived.json", {"stage": stage, "artifact": receipt.qualified_name})
-        print(f"[checkpoint] W&B acknowledged {stage}", flush=True)
+        print(f"[checkpoint] W&B acknowledged {stage}: {receipt.qualified_name}; local={self.local}", flush=True)
 
 
 class KaggleTrainer(ct.Trainer):
     def __init__(self, *args, **kwargs):
+        ks.require_ready(smoke=(kwargs.get("config") or args[2]).get("synthetic", False))
         super().__init__(*args, **kwargs)
         if not kwargs.get("resume", False):
             self.scaler = torch.amp.GradScaler(
@@ -282,6 +384,7 @@ def settling_updates(update, *, max_skips=8, required=2):
 
 
 def probe_batch(model, dataset, config, *, fraction=0.8, initial_scale=1024):
+    ks.require_ready(smoke=config.get("synthetic", False))
     device = next(model.parameters()).device
     if device.type == "cpu":
         return {"batch_size": 2, "fp16_init_scale": initial_scale, "peak_gib": 0, "status": "synthetic-cpu"}
@@ -291,6 +394,10 @@ def probe_batch(model, dataset, config, *, fraction=0.8, initial_scale=1024):
     trials = []
     try:
         for batch in (16, 8, 4, 2, 1):
+            print(
+                f"[batch] GPU {os.environ.get('CUDA_VISIBLE_DEVICES', '0')} candidate={batch} scale={initial_scale}",
+                flush=True,
+            )
             optimizer = scaler = None
             try:
                 model.load_state_dict(original)
@@ -324,6 +431,8 @@ def probe_batch(model, dataset, config, *, fraction=0.8, initial_scale=1024):
                     scale = scaler.get_scale()
                     scaler.step(optimizer)
                     scaler.update()
+                    if scaler.get_scale() < scale:
+                        print(f"[batch] overflow skip scale={scale:g}->{scaler.get_scale():g}", flush=True)
                     return scaler.get_scale() >= scale
 
                 skips = settling_updates(update)
@@ -365,16 +474,15 @@ class SmokeModel(ft.SmokeModel):
 
 
 def make_model(spec, *, smoke, resume=False):
-    return (
-        SmokeModel(spec)
-        if smoke
-        else cm.ControlsModel(
-            **{key: value for key, value in spec.items() if key != "code"},
-            D=256,
-            enc2d="maxvit_tiny_rw_224",
-            enc3d_features=(32, 64, 128, 192),
-            enc2d_pretrained=not resume,
-        )
+    ks.require_ready(smoke=smoke)
+    if smoke:
+        return SmokeModel(spec)
+    return cm.ControlsModel(
+        **{key: spec[key] for key in ("use_3d", "n_2d", "view_indices", "fusion", "gate_fixed")},
+        D=256,
+        enc2d="maxvit_tiny_rw_224",
+        enc3d_features=(32, 64, 128, 192),
+        enc2d_pretrained=not resume,
     )
 
 
@@ -384,14 +492,7 @@ def digest(value):
 
 def study_contract(cfg):
     code_hashes = {}
-    for name in (
-        "controls_model",
-        "controls_training",
-        "final_model",
-        "final_training",
-        "controls_kaggle_data",
-        "controls_kaggle",
-    ):
+    for name in ks.MODULES:
         code_hashes[name] = sha256(Path(__file__).with_name(name + ".py"))
     return {
         **{
@@ -415,6 +516,13 @@ def study_contract(cfg):
             "torch": str(torch.__version__),
             "cuda": torch.version.cuda,
             "timm": "synthetic" if cfg["smoke"] else importlib.metadata.version("timm"),
+            "protected": {} if cfg["smoke"] else ks.protected_versions(),
+            "support": {}
+            if cfg["smoke"]
+            else {
+                package.split("==")[0]: importlib.metadata.version(package.split("==")[0])
+                for package in ks.SUPPORT.values()
+            },
         },
         "code_hashes": code_hashes,
         "step_metrics": True,
@@ -427,11 +535,11 @@ def study_contract(cfg):
 
 def training_config(cfg, prepared, spec, seed, dataset):
     weights = len(dataset) / (2 * np.bincount(dataset.labels, minlength=2).astype(float))
-    kind = "bilateral" if spec["code"] == "B4" else "raw"
+    kind = spec.get("dataset", "raw")
     return {
         **study_contract(cfg),
         "seed": seed,
-        "spec": spec,
+        "spec": json.loads(json.dumps(spec)),
         "class_weights": weights.tolist(),
         "data": {s: e["identity"] for s, e in prepared[kind]["entries"].items()},
         "dataset": kind,
@@ -443,15 +551,20 @@ def validate_identity(cfg, tag, identity, prepared=None):
         raise ValueError("Malformed run identity")
     spec, seed, _ = jobs({**cfg, "run_target": tag})[0]
     config = identity.get("config", {})
-    kind = "bilateral" if spec["code"] == "B4" else "raw"
-    expected = {**study_contract(cfg), "spec": spec, "seed": seed, "dataset": kind}
+    kind = spec.get("dataset", "raw")
+    expected = json.loads(json.dumps({**study_contract(cfg), "spec": spec, "seed": seed, "dataset": kind}))
+    actual = json.loads(json.dumps(config))
     if (
         not isinstance(identity.get("id"), str)
         or not identity["id"]
         or identity.get("warm_start", "")
-        or any(config.get(k) != v for k, v in expected.items())
+        or any(actual.get(k) != v for k, v in expected.items())
     ):
-        raise ValueError(f"Run identity/study/code mismatch: {tag}")
+        raise ValueError(
+            f"Run identity/study/code mismatch: {tag}; incompatible code/environment. "
+            "Restore the exact old revision/dependency versions recorded in run_identity.json, "
+            "or request an explicit migration for that checkpoint. No automatic migration or fresh start."
+        )
     batch, accum = config.get("batch_size"), config.get("grad_accum")
     if (
         not isinstance(batch, int)
@@ -473,10 +586,7 @@ def validate_identity(cfg, tag, identity, prepared=None):
     for split, entry in data.items():
         source = entry.get("identity", {})
         recipe = kd.projection_signature(cfg["res2d"])
-        recipe.update(
-            repo=kd.cd.DEFAULT_REPO if kind == "bilateral" else kd.RAW_REPO,
-            revision=kd.cd.DEFAULT_REVISION if kind == "bilateral" else kd.RAW_REVISION,
-        )
+        recipe.update(kd.source_recipe(kind))
         hashes = [entry.get("views"), entry.get("dz"), source.get("volumes"), source.get("labels")]
         if kind == "bilateral" and not cfg["smoke"]:
             hashes.append(source.get("manifest"))
@@ -782,12 +892,12 @@ def _hydrate(cfg, tag, prepared=None):
             shutil.rmtree(owned_download)
 
 
-def evaluate_callback(dataset, batch_size, num_workers=0, split="val"):
+def evaluate_callback(dataset, batch_size, num_workers=0, split="val", epoch=None):
     def evaluate(model):
         probs, labels, logits = ft.predict(model, dataset, batch_size, num_workers=num_workers, amp_dtype="float16")
         metrics = fm.full_metrics(probs, labels)
         metrics["loss"] = torch.nn.functional.cross_entropy(torch.tensor(logits), torch.tensor(labels)).item()
-        print(f"[{split}] {metrics}", flush=True)
+        print(f"[{split}] epoch {epoch() if epoch is not None else 'unspecified'}: {metrics}", flush=True)
         return metrics
 
     return evaluate
@@ -992,8 +1102,12 @@ def check_cuda_runtime(*, smoke, run):
         run.log({"runtime/phase": "device-check", "runtime/device_check/status": metadata["status"]})
 
 
-def worker(cfg, prepared, tag, *, deadline, stop_path):
+def worker(cfg, prepared, tag, *, deadline, stop_path, code_hashes=None):
     validate_config(cfg)
+    if code_hashes is not None and study_contract(cfg)["code_hashes"] != code_hashes:
+        raise RuntimeError(
+            "Worker source differs from controller; incompatible code/environment. Restart with one checkout."
+        )
     configure_runtime(cfg)
     load_credentials(smoke=cfg["smoke"])
     spec, seed, _ = next(job for job in jobs({**cfg, "run_target": tag}) if job[2] == tag)
@@ -1142,8 +1256,12 @@ def worker(cfg, prepared, tag, *, deadline, stop_path):
                 completed = False
             else:
                 completed = trainer.fit(
-                    evaluate_callback(datasets[1], config["batch_size"], cfg["num_workers"], "val"),
-                    test_evaluate=evaluate_callback(datasets[2], config["batch_size"], cfg["num_workers"], "test"),
+                    evaluate_callback(
+                        datasets[1], config["batch_size"], cfg["num_workers"], "val", lambda: trainer.epoch + 1
+                    ),
+                    test_evaluate=evaluate_callback(
+                        datasets[2], config["batch_size"], cfg["num_workers"], "test", lambda: trainer.epoch
+                    ),
                     boundary_hook=boundary,
                     epoch_hook=epoch_hook,
                 )
@@ -1200,20 +1318,56 @@ def request_stop(stop_path):
         temporary.unlink(missing_ok=True)
 
 
+def relay_log(pid, *, finished=False):
+    state = OWNED_LOGS.get(pid)
+    if state is None:
+        return True
+    with state["path"].open("rb") as stream:
+        stream.seek(state["offset"])
+        chunk = stream.read(65536)
+        state["offset"] = stream.tell()
+        drained = stream.read(1) == b""
+    text = state["partial"] + chunk.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    state["partial"] = lines.pop()
+    if (finished and drained) or len(state["partial"]) > 4096:
+        lines.append(state["partial"])
+        state["partial"] = ""
+    for line in lines:
+        for key in ("HF_TOKEN", "WANDB_API_KEY"):
+            if os.environ.get(key):
+                line = line.replace(os.environ[key], "[REDACTED]")
+        if line:
+            print(f"[{state['tag']} GPU {state['physical']}] {line}", flush=True)
+    if finished and drained:
+        OWNED_LOGS.pop(pid)
+    return drained
+
+
 def wait_owned(stop_path, grace_seconds):
     request_stop(stop_path)
     until = time.monotonic() + grace_seconds
+    failures = []
     while OWNED_CHILDREN and time.monotonic() < until:
         for pid, child in list(OWNED_CHILDREN.items()):
-            if child.poll() is not None:
+            status = child.poll()
+            drained = relay_log(pid, finished=status is not None)
+            if status is not None and drained:
                 child.wait()
                 OWNED_CHILDREN.pop(pid)
+                if status:
+                    failures.append((pid, status))
         if OWNED_CHILDREN:
             time.sleep(0.2)
     if OWNED_CHILDREN:
         raise RuntimeError(
             f"Checkpoint grace expired; owned children STILL ALIVE {list(OWNED_CHILDREN)}. "
+            f"Exited worker failures: {failures}. "
             "Stop marker remains; call wait_owned again. No unrelated process was signalled."
+        )
+    if failures:
+        raise RuntimeError(
+            f"Owned worker failures while stopping (PID, exit): {failures}; inspect persisted worker logs"
         )
 
 
@@ -1365,6 +1519,7 @@ def dispatch(cfg, prepared):
                         "tag": tag,
                         "deadline": deadline,
                         "stop_path": str(stop),
+                        "code_hashes": study_contract(cfg)["code_hashes"],
                     }
                     job_path = root / f"{tag}.job.json"
                     write_json(job_path, payload)
@@ -1373,16 +1528,23 @@ def dispatch(cfg, prepared):
                     if cfg["smoke"]:
                         worker(**payload)
                     else:
-                        child = subprocess.Popen(
-                            [sys.executable, "-m", "scripts.controls_kaggle", "--worker", str(job_path)],
-                            env=child_env(physical),
-                            cwd=Path(__file__).resolve().parents[1],
-                        )
+                        log_path = root / f"{tag}.GPU{physical}.{uuid.uuid4().hex[:8]}.log"
+                        with log_path.open("ab", buffering=0) as log:
+                            child = subprocess.Popen(
+                                [sys.executable, "-m", "scripts.controls_kaggle", "--worker", str(job_path)],
+                                env=child_env(physical),
+                                cwd=Path(__file__).resolve().parents[1],
+                                stdout=log,
+                                stderr=subprocess.STDOUT,
+                            )
+                        OWNED_LOGS[child.pid] = dict(path=log_path, offset=0, partial="", tag=tag, physical=physical)
+                        print(f"[train] worker log: {log_path}", flush=True)
                         active[physical] = child
                         OWNED_CHILDREN[child.pid] = child
                 for physical, child in list(active.items()):
                     status = child.poll()
-                    if status is not None:
+                    drained = relay_log(child.pid, finished=status is not None)
+                    if status is not None and drained:
                         child.wait()
                         OWNED_CHILDREN.pop(child.pid)
                         active.pop(physical)
@@ -1430,7 +1592,8 @@ def aggregate(cfg, prepared=None):
     validate_summary(cfg, value, prepared)
     result = {}
     for spec in SPECS:
-        tags = [f"{spec['code']}_s{seed}" for seed in cfg["seeds"] if f"{spec['code']}_s{seed}" in records]
+        seeds = spec.get("seeds", cfg["seeds"])
+        tags = [f"{spec['code']}_s{seed}" for seed in seeds if f"{spec['code']}_s{seed}" in records]
         metrics = {}
         for key in sorted({key for tag in tags for key in records[tag]["metrics"]}):
             values = [records[tag]["metrics"][key] for tag in tags if records[tag]["metrics"].get(key) is not None]
@@ -1480,7 +1643,7 @@ def persist_summary(cfg, value):
                 )
             }
         )
-        run.summary.update({"completed_runs": len(value["runs"]), "study_runs": 21})
+        run.summary.update({"completed_runs": len(value["runs"]), "study_runs": len(jobs({**cfg, "run_target": ""}))})
         if not cfg["smoke"]:
             artifact = wandb.Artifact(f"controls-summary-{cfg['group']}", type="report")
             for name in ("controls_96_summary.json", "controls_96_summary.csv"):

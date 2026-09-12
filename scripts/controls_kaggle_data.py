@@ -5,10 +5,15 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import shutil
 import time
 import uuid
 from pathlib import Path
+
+from scripts import controls_kaggle_setup as ks
+
+ks.require_ready(smoke=os.environ.get("CTRL_KAGGLE_SMOKE", "0") == "1", importing=True)
 
 import numpy as np
 import psutil
@@ -20,9 +25,21 @@ from scripts import controls_training as ct
 from scripts import final_model as fm
 from scripts import final_training as ft
 
+ks.record_imports()
+
 RAW_REPO = "tqhuyen/harvard-oct-glaucoma-200"
 RAW_REVISION = "939a38876b7b9313162842ef2d44b7edc2b57020"
+BM3D_REPO = "tqhuyen/harvard-gf-denoise-benchmark-v2"
+BM3D_PREFIX = "classical/bm3d/3375a321513938835d2c"
 SPLITS = ("Training", "Validation", "Test")
+
+
+def source_recipe(kind):
+    if kind == "bilateral":
+        return {"repo": cd.DEFAULT_REPO, "revision": cd.DEFAULT_REVISION}
+    if kind == "bm3d":
+        return {"repo": BM3D_REPO, "prefix": BM3D_PREFIX}
+    return {"repo": RAW_REPO, "revision": RAW_REVISION}
 
 
 def sha256(path):
@@ -95,11 +112,14 @@ def run_lock(path):
 
 
 def prepare_source(cfg, kind):
+    ks.require_ready(smoke=cfg["smoke"])
     with run_lock(Path(cfg["temp_root"]) / f"source-{kind}.lock"):
         return _prepare_source(cfg, kind)
 
 
 def _prepare_source(cfg, kind):
+    if kind == "bm3d":
+        return _prepare_bm3d_source(cfg)
     root = Path(cfg[f"{kind}_root"] or Path(cfg["temp_root"]) / kind)
     root_attached = bool(cfg[f"{kind}_root"])
     suffix = "volumes_dn" if kind == "bilateral" else "volumes"
@@ -146,7 +166,11 @@ def _prepare_source(cfg, kind):
                 local_dir=str(root),
                 allow_patterns=missing,
             )
-        hashes = {name: cd._verify_file(root / name, files[name]) for name in names}
+        hashes = {}
+        for name in names:
+            print(f"[data] hash start {kind}/{name}", flush=True)
+            hashes[name] = cd._verify_file(root / name, files[name])
+            print(f"[data] hash done {kind}/{name}: {hashes[name]}", flush=True)
         manifest = json.loads((root / "manifest.json").read_text()) if kind == "bilateral" else None
         write_json(Path(cfg["temp_root"]) / f"{kind}_source_hashes.json", hashes)
     entries = {}
@@ -176,7 +200,182 @@ def _prepare_source(cfg, kind):
     return {"kind": kind, "entries": entries, "manifest": manifest, "hashes": hashes}
 
 
+def _bm3d_identity(shard_hashes, labels_hash, shape=None):
+    body = {"repo": BM3D_REPO, "prefix": BM3D_PREFIX, "shards": list(shard_hashes), "labels": labels_hash}
+    if shape is not None:
+        body["shape"] = list(shape)
+    return {
+        "volumes": hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest(),
+        "labels": labels_hash,
+        "shape": list(shape) if shape is not None else None,
+        "repo": BM3D_REPO,
+        "prefix": BM3D_PREFIX,
+    }
+
+
+def _validate_bm3d_split(split, volumes, labels, res):
+    if volumes.dtype != np.uint8 or volumes.shape[-3:] != (res,) * 3:
+        raise ValueError("BM3D source must be uint8 storage-200, never stored bilateral-96")
+    if volumes.ndim not in (4, 5) or (volumes.ndim == 5 and volumes.shape[1] != 1):
+        raise ValueError("Invalid BM3D source dimensions")
+    if labels.shape != (len(volumes),) or set(np.unique(labels)) != {0, 1}:
+        raise ValueError(f"BM3D split {split} labels do not match volume count or are not binary")
+
+
+def _prepare_bm3d_source(cfg):
+    root = Path(cfg["bm3d_root"] or Path(cfg["temp_root"]) / "bm3d")
+    root_attached = bool(cfg["bm3d_root"])
+    names = [f"{split}_volumes.npy" for split in SPLITS] + [f"{split}_labels.npy" for split in SPLITS]
+    res = 8 if cfg["smoke"] else 200
+    entries, hashes = {}, {}
+    if cfg["smoke"]:
+        if root_attached:
+            raise ValueError("Synthetic smoke requires temp roots; attached inputs are never written")
+        root.mkdir(parents=True, exist_ok=True)
+        rng = np.random.default_rng(0)
+        for split in SPLITS:
+            vp, lp = root / f"{split}_volumes.npy", root / f"{split}_labels.npy"
+            if not vp.exists():
+                np.save(vp, rng.integers(0, 256, (4, 8, 8, 8), dtype=np.uint8))
+            if not lp.exists():
+                np.save(lp, np.array([0, 1, 0, 1], dtype=np.int64))
+        for name in names:
+            hashes[name] = sha256(root / name)
+        for split in SPLITS:
+            vp, lp = root / f"{split}_volumes.npy", root / f"{split}_labels.npy"
+            volumes, labels = np.load(vp, mmap_mode="r"), np.load(lp, mmap_mode="r")
+            _validate_bm3d_split(split, volumes, labels, res)
+            entries[split] = {
+                "source": str(vp),
+                "labels": str(lp),
+                "identity": _bm3d_identity([hashes[vp.name]], hashes[lp.name], list(volumes.shape)),
+            }
+        print("[data] Verified bm3d sources (read-only synthetic)", flush=True)
+        return {"kind": "bm3d", "entries": entries, "manifest": None, "hashes": hashes}
+    from huggingface_hub import HfApi, snapshot_download
+
+    token = os.environ["HF_TOKEN"]
+    api = HfApi(token=token)
+    benchmark = api.dataset_info(BM3D_REPO, files_metadata=True)
+    files = {item.rfilename: item for item in benchmark.siblings}
+    complete_name = f"{BM3D_PREFIX}/_COMPLETE.json"
+    if complete_name not in files:
+        raise ValueError("BM3D benchmark is missing the per-method _COMPLETE.json")
+    label_names = [f"{split}_labels.npy" for split in SPLITS]
+    raw_info = api.dataset_info(RAW_REPO, revision=RAW_REVISION, files_metadata=True)
+    if raw_info.sha != RAW_REVISION:
+        raise ValueError("Pinned HF raw revision mismatch")
+    raw_files = {item.rfilename: item for item in raw_info.siblings}
+    if any(name not in raw_files for name in label_names):
+        raise ValueError("Pinned raw source missing labels")
+    missing_labels = [name for name in label_names if not (root / name).is_file()]
+    if missing_labels and root_attached:
+        raise FileNotFoundError(f"Attached BM3D labels are incomplete (never written): {missing_labels}")
+    if missing_labels:
+        require_disk(root, sum(raw_files[name].size for name in missing_labels) + 2 * 1024**3)
+        root.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=RAW_REPO,
+            repo_type="dataset",
+            revision=RAW_REVISION,
+            token=token,
+            local_dir=str(root),
+            allow_patterns=missing_labels,
+        )
+    for name in label_names:
+        print(f"[data] hash start bm3d/{name}", flush=True)
+        hashes[name] = cd._verify_file(root / name, raw_files[name])
+        print(f"[data] hash done bm3d/{name}: {hashes[name]}", flush=True)
+    write_json(Path(cfg["temp_root"]) / "bm3d_source_hashes.json", hashes)
+    for split in SPLITS:
+        vp, lp = root / f"{split}_volumes.npy", root / f"{split}_labels.npy"
+        labels = np.load(lp, mmap_mode="r")
+        shard_names = sorted(
+            name for name in files if name.startswith(f"{BM3D_PREFIX}/volumes/{split}/shard-") and name.endswith(".npy")
+        )
+        if not shard_names:
+            raise ValueError(f"BM3D benchmark has no shards for {split}")
+        shard_hashes = []
+        for name in shard_names:
+            lfs = files[name].lfs
+            digest = lfs.get("sha256") if isinstance(lfs, dict) else getattr(lfs, "sha256", None)
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ValueError(f"BM3D shard lacks LFS SHA256: {name}")
+            shard_hashes.append(digest)
+        sidecar = root / f"{split}_volumes.identity.json"
+        if vp.is_file() and sidecar.is_file():
+            shape = list(np.load(vp, mmap_mode="r").shape)
+            identity = _bm3d_identity(shard_hashes, hashes[lp.name], shape)
+            saved = json.loads(sidecar.read_text())
+            if saved.get("identity") == identity:
+                _validate_bm3d_split(split, np.load(vp, mmap_mode="r"), labels, res)
+                entries[split] = {"source": str(vp), "labels": str(lp), "identity": identity}
+                hashes[vp.name] = saved["volumes_sha256"]
+                print(f"[data] bm3d/{split}: resumable consolidated file verified", flush=True)
+                continue
+        if root_attached:
+            if not vp.is_file():
+                raise FileNotFoundError(f"Attached BM3D root requires pre-consolidated {vp.name}")
+            volumes = np.load(vp, mmap_mode="r")
+            _validate_bm3d_split(split, volumes, labels, res)
+            identity = _bm3d_identity(shard_hashes, hashes[lp.name], list(volumes.shape))
+            hashes[vp.name] = identity["volumes"]
+            entries[split] = {"source": str(vp), "labels": str(lp), "identity": identity}
+            print(f"[data] bm3d/{split}: attached pre-consolidated file verified (never written)", flush=True)
+            continue
+        require_disk(root, sum(files[name].size for name in shard_names) + 2 * 1024**3)
+        root.mkdir(parents=True, exist_ok=True)
+        total = int(labels.shape[0])
+        temporary = root / f".{split}_volumes.partial.npy"
+        writer, trailing, offset = None, None, 0
+        for name, digest in zip(shard_names, shard_hashes):
+            local = root / name
+            if not local.is_file():
+                snapshot_download(
+                    repo_id=BM3D_REPO,
+                    repo_type="dataset",
+                    token=token,
+                    local_dir=str(root),
+                    allow_patterns=[name],
+                )
+            print(f"[data] hash start bm3d/{split}/{Path(name).name}", flush=True)
+            actual = cd._verify_file(local, files[name])
+            if actual != digest:
+                raise ValueError(f"BM3D shard checksum mismatch: {name}")
+            print(f"[data] hash done bm3d/{split}/{Path(name).name}: {actual}", flush=True)
+            shard = np.load(local, mmap_mode="r")
+            if writer is None:
+                trailing = tuple(shard.shape[1:])
+                require_disk(root, total * int(np.prod(trailing)) + files[name].size + 2 * 1024**2)
+                writer = np.lib.format.open_memmap(temporary, mode="w+", dtype=np.uint8, shape=(total, *trailing))
+            elif tuple(shard.shape[1:]) != trailing:
+                raise ValueError(f"BM3D shards for {split} have inconsistent trailing shapes")
+            count = int(shard.shape[0])
+            if offset + count > total:
+                raise ValueError(f"BM3D shards for {split} exceed label count {total}")
+            writer[offset : offset + count] = shard
+            offset += count
+            del shard
+            local.unlink(missing_ok=True)
+        if writer is None or offset != total:
+            raise ValueError(f"BM3D shards for {split} produced {offset} volumes, labels expect {total}")
+        writer.flush()
+        del writer
+        os.replace(temporary, vp)
+        volumes = np.load(vp, mmap_mode="r")
+        _validate_bm3d_split(split, volumes, labels, res)
+        identity = _bm3d_identity(shard_hashes, hashes[lp.name], list(volumes.shape))
+        saved = {"identity": identity, "volumes_sha256": sha256(vp)}
+        write_json(sidecar, saved)
+        hashes[vp.name] = saved["volumes_sha256"]
+        entries[split] = {"source": str(vp), "labels": str(lp), "identity": identity}
+        print(f"[data] bm3d/{split}: consolidated {total} volumes from {len(shard_names)} shards", flush=True)
+    print("[data] Verified bm3d sources (read-only)", flush=True)
+    return {"kind": "bm3d", "entries": entries, "manifest": None, "hashes": hashes}
+
+
 def verify_bilateral(raw, bilateral, *, smoke=False):
+    ks.require_ready(smoke=smoke)
     if not smoke:
         manifest = bilateral["manifest"]
         identity = manifest.get("identity", {})
@@ -212,6 +411,7 @@ def verify_bilateral(raw, bilateral, *, smoke=False):
 
 
 def prepare_views(cfg, source):
+    ks.require_ready(smoke=cfg["smoke"])
     with run_lock(Path(cfg["temp_root"]) / f"views-{source['kind']}.lock"):
         return _prepare_views(cfg, source)
 
@@ -254,6 +454,8 @@ def _prepare_views(cfg, source):
                 temporary, mode="w+", dtype=np.uint8, shape=(len(volumes), 2, res2d, res2d)
             )
             dzs = np.zeros(len(volumes), dtype=np.int8)
+            last_progress = time.monotonic()
+            print(f"[views] start {source['kind']}/{split}: {len(volumes)} volumes", flush=True)
             for index in range(len(volumes)):
                 raw = ft.volume_sample(volumes, index)
                 dzs[index] = fm.depth_axis(raw)
@@ -266,6 +468,9 @@ def _prepare_views(cfg, source):
                         .clip(0, 255)
                         .astype(np.uint8)
                     )
+                if (index + 1) % 200 == 0 or time.monotonic() - last_progress >= 10 or index + 1 == len(volumes):
+                    print(f"[views] {source['kind']}/{split}: {index + 1}/{len(volumes)}", flush=True)
+                    last_progress = time.monotonic()
             views.flush()
             del views
             os.replace(temporary, vp)
@@ -289,7 +494,8 @@ class KaggleDataset(ct.ControlsDataset):
 
 
 def make_datasets(prepared, spec, seed, *, smoke=False):
-    entries = prepared["bilateral" if spec["code"] == "B4" else "raw"]["entries"]
+    ks.require_ready(smoke=smoke)
+    entries = prepared[spec.get("dataset", "raw")]["entries"]
     return [
         KaggleDataset(entries[s], seed=seed, train=s == "Training", use_3d=spec["use_3d"], smoke=smoke) for s in SPLITS
     ]
