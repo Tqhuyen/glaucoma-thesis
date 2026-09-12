@@ -286,6 +286,9 @@ def test_shard_transaction_and_completed_resume(tmp_path, monkeypatch, fail_uplo
     suite = SimpleNamespace(MetricContext=Context, metric_protocol={"version": "test"}, release_memory=lambda: None)
     cp = SimpleNamespace(asnumpy=np.asarray)
     run = SimpleNamespace(log=lambda _: None, log_artifact=lambda _: None)
+    baseline = tmp_path / "original" / "baseline"
+    baseline.mkdir(parents=True)
+    (baseline / "per_volume.csv").write_text("split,index,class,SNR\nTraining,0,0,1.0\nTraining,1,1,1.0\n")
     parameters = (
         args,
         "gaussian",
@@ -295,7 +298,7 @@ def test_shard_transaction_and_completed_resume(tmp_path, monkeypatch, fail_uplo
         None,
         archive,
         run,
-        {},
+        {"methods": {"original": {"config_id": "baseline"}}},
         lambda **kwargs: None,
         lambda: False,
         cp,
@@ -312,6 +315,12 @@ def test_shard_transaction_and_completed_resume(tmp_path, monkeypatch, fail_uplo
     assert len(calls) == 2
     assert not list(tmp_path.rglob("*.npy"))
     assert len(list(tmp_path.rglob("*.slices.jsonl.gz"))) == 1
+    import pandas as pd
+
+    aggregate = pd.read_csv(next(tmp_path.rglob("aggregate.csv")))
+    assert set(aggregate["scope"]) == {"split_class", "split", "whole_dataset"}
+    paired = pd.read_csv(next(tmp_path.rglob("paired_vs_raw.csv")))
+    assert paired["SNR_minus_raw"].eq(0).all()
     result = job.run_method(*parameters)
     assert result["resumed_remote"]
     assert len(calls) == 2 and len(verified) >= 6

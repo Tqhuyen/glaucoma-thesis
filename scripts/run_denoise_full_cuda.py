@@ -68,7 +68,7 @@ def disk_gate(path, required=0):
         raise OSError("Insufficient disk: must retain 10 GiB reserve")
 
 
-def download_verified(session, url, token, target, size, expected, *, git=False, attempts=6):
+def download_verified(session, url, token, target, size, expected, *, git=False, attempts=6, progress=None):
     target = Path(target)
     algorithm = "sha1" if git else "sha256"
     if target.exists():
@@ -78,6 +78,8 @@ def download_verified(session, url, token, target, size, expected, *, git=False,
     partial = target.with_name(target.name + ".partial")
     for attempt in range(attempts):
         start = partial.stat().st_size if partial.exists() else 0
+        if progress:
+            progress(start, size)
         if start > size:
             raise ValueError("Oversized partial raw cache; preserved for inspection")
         disk_gate(target.parent, size - start)
@@ -93,11 +95,15 @@ def download_verified(session, url, token, target, size, expected, *, git=False,
                             raise ValueError("Strict Content-Range validation failed")
                     with partial.open("ab") as stream:
                         received = start
+                        last_report = time.monotonic()
                         for block in response.iter_content(8 * 1024**2):
                             received += len(block)
                             if received > size:
                                 raise ValueError("Oversized HTTP body")
                             stream.write(block)
+                            if progress and time.monotonic() - last_report >= 5:
+                                progress(received, size)
+                                last_report = time.monotonic()
                         stream.flush()
                         os.fsync(stream.fileno())
             if partial.stat().st_size != size:
@@ -105,6 +111,8 @@ def download_verified(session, url, token, target, size, expected, *, git=False,
             if digest(partial, algorithm, git) != expected:
                 raise ValueError("Pinned raw source hash mismatch")
             os.replace(partial, target)
+            if progress:
+                progress(size, size)
             return
         except Exception:
             if attempt + 1 == attempts:
@@ -260,7 +268,7 @@ def validate_arrays(raw, labels, split):
         raise ValueError(f"Source class counts disagree: {split}")
 
 
-def load_sources(archive, directory):
+def load_sources(archive, directory, progress=None):
     from huggingface_hub import hf_hub_url
 
     directory.mkdir(parents=True, exist_ok=True)
@@ -282,6 +290,7 @@ def load_sources(archive, directory):
                 file.size,
                 sha,
                 git=not bool(file.lfs),
+                progress=(lambda done, total, name=name: progress(name, done, total)) if progress else None,
             )
             provenance[name] = {"size": file.size, "source_hash": sha, "hash_kind": "sha256" if file.lfs else "git"}
         raw = np.load(directory / f"{split}_volumes.npy", mmap_mode="r", allow_pickle=False)
@@ -363,22 +372,30 @@ def validate_oct_planes(backend, volume):
     }
 
 
-def aggregate(directory):
+def aggregate(directory, baseline=None):
     import pandas as pd
 
     rows = []
     for path in sorted(directory.glob("metrics/*/shard-*.jsonl")):
         rows.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
     frame = pd.DataFrame(rows)
-    numeric = [c for c in frame if c not in {"index", "class", "split", "invalid_reasons"}]
+    numeric = [
+        c
+        for c in frame
+        if c not in {"index", "class", "split", "invalid_reasons", "depth_axis", "slice_axis", "otsu_threshold"}
+    ]
     frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="raise")
     result = []
-    for (split, label), group in frame.groupby(["split", "class"]):
+    groups = [("split_class", split, label, group) for (split, label), group in frame.groupby(["split", "class"])]
+    groups += [("split", split, None, group) for split, group in frame.groupby("split")]
+    groups.append(("whole_dataset", "all", None, frame))
+    for scope, split, label, group in groups:
         for key in numeric:
             values = group[key].dropna()
             result.append(
                 {
                     "split": split,
+                    "scope": scope,
                     "class": label,
                     "metric": key,
                     "count": len(values),
@@ -393,6 +410,16 @@ def aggregate(directory):
             )
     target = directory / "aggregate.csv"
     pd.DataFrame(result).to_csv(target, index=False, na_rep="")
+    frame.to_csv(directory / "per_volume.csv", index=False, na_rep="")
+    if baseline is not None:
+        base = pd.read_csv(Path(baseline) / "per_volume.csv")
+        paired = frame.merge(base, on=["split", "index", "class"], suffixes=("", "_raw"), validate="one_to_one")
+        if len(paired) != len(frame) or len(base) != len(frame):
+            raise ValueError("Raw baseline and method do not cover the same samples")
+        delta = paired[["split", "index", "class"]].copy()
+        for key in numeric:
+            delta[key + "_minus_raw"] = paired[key] - paired[key + "_raw"]
+        delta.to_csv(directory / "paired_vs_raw.csv", index=False, na_rep="")
     return target
 
 
@@ -450,6 +477,18 @@ def run_method(
             raise ValueError("Remote configuration mismatch")
         atomic_json(manifest_path, saved_manifest)
         atomic_json(final_receipt, saved_receipts)
+        from huggingface_hub import hf_hub_url
+
+        for receipt in saved_receipts["artifacts"]:
+            if receipt["remote"] == f"{prefix}/per_volume.csv":
+                download_verified(
+                    archive.session,
+                    hf_hub_url(DESTINATION, receipt["remote"], repo_type="dataset", revision=receipt["commit"]),
+                    archive.token,
+                    directory / "per_volume.csv",
+                    receipt["size"],
+                    receipt["sha256"],
+                )
         return {"status": "complete", "config_id": cid, "prefix": prefix, "resumed_remote": True}
     if resume_only:
         return None
@@ -579,15 +618,24 @@ def run_method(
             mirror(args, directory)
             if name != "original":
                 cleanup_generated(target, shard_root, receipt)
-    aggregate_path = aggregate(directory)
+    baseline = None
+    if name != "original":
+        baseline = args.work_dir / "original" / state["methods"]["original"]["config_id"]
+        if not (baseline / "per_volume.csv").is_file():
+            raise FatalJobError("Raw baseline per-volume report missing locally; do not publish unpaired comparison")
+    aggregate_path = aggregate(directory, baseline)
     manifest["complete"] = True
     atomic_json(manifest_path, manifest)
     receipts = [
         archive.upload(aggregate_path, f"{prefix}/aggregate.csv"),
         archive.upload(manifest_path, f"{prefix}/manifest.json"),
     ]
+    for report_path in (directory / "per_volume.csv", directory / "paired_vs_raw.csv"):
+        if report_path.exists():
+            receipts.append(archive.upload(report_path, f"{prefix}/{report_path.name}"))
+    manifest_receipt = next(receipt for receipt in receipts if receipt["remote"] == f"{prefix}/manifest.json")
     marker = directory / "_COMPLETE.json"
-    atomic_json(marker, {"complete": True, "volumes": 3300, "manifest": receipts[-1], "reports": receipts.copy()})
+    atomic_json(marker, {"complete": True, "volumes": 3300, "manifest": manifest_receipt, "reports": receipts.copy()})
     receipts.append(archive.upload(marker, f"{prefix}/_COMPLETE.json"))
     atomic_json(final_receipt, {"artifacts": receipts})
     import wandb
@@ -713,7 +761,13 @@ def main(argv=None):
         if run is None or run.settings.mode != "online":
             raise RuntimeError("Online W&B is mandatory")
         status(phase="downloading_raw", wandb_url=run.url)
-        arrays, provenance = load_sources(archive, args.raw_dir)
+        arrays, provenance = load_sources(
+            archive,
+            args.raw_dir,
+            progress=lambda name, done, total: status(
+                phase="downloading_raw", file=name, downloaded_bytes=done, expected_bytes=total
+            ),
+        )
         atomic_json(args.work_dir / "source.json", {"repo": SOURCE, "revision": REVISION, "files": provenance})
         archive.upload(args.work_dir / "source.json", "source.json")
         for split in SPLITS:
@@ -734,7 +788,7 @@ def main(argv=None):
             pending.write_text(
                 f"# {name}\nPending bounded speed gate. No inference or training performed.\n", encoding="utf-8"
             )
-            archive.upload(pending, f"deep/{name}/README.md")
+            archive.upload(pending, f"deep_learning/{name.lower()}/README.md")
         import cupy as cp
 
         from scripts import denoise_cuda_suite as suite

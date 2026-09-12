@@ -18,8 +18,28 @@ BM3D_RELATIVE_DLL = "bm3d/extracted/VapourSynth-BM3DCUDA-R2.15/bm3dcuda.dll"
 _BM3D_CORE = None
 _BM3D_PATH = None
 
+_GAUSSIAN_KERNEL = r"""
+extern "C" __global__ void gaussian_symmetric_nearest(
+    const float* image, float* output, const double* weights,
+    const long long size, const int stride, const int length, const int radius) {
+    const long long index = (long long)blockDim.x * blockIdx.x + threadIdx.x;
+    if (index >= size) return;
+    const int coordinate = (index / stride) % length;
+    const long long base = index - (long long)coordinate * stride;
+    double value = (double)image[index] * weights[radius];
+    for (int offset = radius; offset > 0; --offset) {
+        const int left = max(0, coordinate - offset);
+        const int right = min(length - 1, coordinate + offset);
+        const double pair = (double)image[base + (long long)left * stride]
+                          + (double)image[base + (long long)right * stride];
+        value = value + pair * weights[radius - offset];
+    }
+    output[index] = (float)value;
+}
+"""
+
 metric_protocol = {
-    "version": "raw-fixed-full-field-bscan-v1",
+    "version": "raw-fixed-full-field-bscan-v2",
     "intensity_units": "uint8 saved output, 0..255; pixel arithmetic float32, metric reductions float64",
     "mask": "one global raw uint8 Otsu threshold; signal raw > threshold, background raw <= threshold",
     "otsu": "256-bin histogram, first maximum between-class variance; constant input returns its value",
@@ -37,6 +57,7 @@ metric_protocol = {
     "beta": "Pearson correlation of 2D gradient magnitudes on raw > per-B-scan 85th percentile",
     "gradient": "numpy.gradient equivalent, edge_order=1, source axes (1,2); no through-slice gradient",
     "beta_global": "pool selected gradient pairs across B-scans, not mean of slice correlations",
+    "reductions": "float64 per-slice sufficient statistics; centered beta covariance merge; one batched CPU transfer",
     "gradient_magnitude_ratio": "sum(filtered selected magnitudes) / sum(raw selected magnitudes)",
     "residual": "raw - saved output; RMS, population std and mean over all pixels",
     "saturation": "fractions of saved output equal to 0 and 255, not pre-clipping frequency",
@@ -76,6 +97,43 @@ def release_memory():
     cp.cuda.get_current_stream().synchronize()
     cp.get_default_memory_pool().free_all_blocks()
     cp.get_default_pinned_memory_pool().free_all_blocks()
+
+
+class _CudaGaussian:
+    """SciPy NI_Correlate1D symmetric summation, float64 weights/accumulator.
+
+    Each separable pass is rounded to float32, including before the second axis.
+    Only the 13 coefficients are constructed on CPU; all pixel work is CUDA.
+    """
+
+    def __init__(self, cp):
+        import scipy
+        from scipy.ndimage._filters import _gaussian_kernel1d
+
+        self.cp = cp
+        weights = _gaussian_kernel1d(1.5, 0, 6).astype(np.float64)
+        self.weights = cp.asarray(weights)
+        self.coefficients_sha256 = hashlib.sha256(weights.tobytes()).hexdigest()
+        self.scipy_version = scipy.__version__
+        self.kernel = cp.RawKernel(
+            _GAUSSIAN_KERNEL,
+            "gaussian_symmetric_nearest",
+            options=("--fmad=false", "--ftz=false"),
+        )
+        self.kernel.compile()
+
+    def __call__(self, image):
+        cp = self.cp
+        current = cp.ascontiguousarray(image, dtype=cp.float32)
+        for stride, length in ((image.shape[2], image.shape[1]), (1, image.shape[2])):
+            output = cp.empty_like(current)
+            self.kernel(
+                ((image.size + 127) // 128,),
+                (128,),
+                (current, output, self.weights, np.int64(image.size), np.int32(stride), np.int32(length), np.int32(6)),
+            )
+            current = output
+        return current
 
 
 def _tv_chambolle(image, cp):
@@ -154,7 +212,10 @@ class Backend:
         _require_memory(self.cp)
         self.engine = None
         implementation = inspect.getsource(type(self)) + inspect.getsource(_tv_chambolle)
-        if name == "bilateral":
+        if name == "gaussian":
+            self.engine = _CudaGaussian(self.cp)
+            implementation += inspect.getsource(_CudaGaussian) + _GAUSSIAN_KERNEL + self.engine.coefficients_sha256
+        elif name == "bilateral":
             from scripts import bilateral_cuda
 
             self.engine = bilateral_cuda.CudaBilateral()
@@ -179,6 +240,13 @@ class Backend:
         }
         if name == "bm3d":
             self.metadata.update(plugin_sha256=BM3D_SHA256, plugin_path=str(_BM3D_PATH), vapoursynth_release=79)
+        elif name == "gaussian":
+            self.metadata.update(
+                implementation="scripts.denoise_cuda_suite._CudaGaussian",
+                arithmetic="SciPy symmetric center-first outer-to-inner float64 sum; float32 per-axis output; no FMA",
+                coefficients_sha256=self.engine.coefficients_sha256,
+                scipy_version=self.engine.scipy_version,
+            )
         elif name == "original":
             self.metadata.update(quantization="none; unchanged uint8 bytes", variant="raw-passthrough")
         self.last_seconds = None
@@ -219,12 +287,12 @@ class Backend:
                     host[i] = np.clip(pixels * 255.0, 0, 255).astype(np.uint8)
             out = cp.asarray(host)
         else:
-            from cupyx.scipy import ndimage
-
             x = cp.asarray(raw, dtype=cp.float32) / cp.float32(255)
             if self.name == "gaussian":
-                filtered = ndimage.gaussian_filter(x, sigma=(0, 1.5, 1.5), mode="nearest", truncate=4.0)
+                filtered = self.engine(x)
             elif self.name == "median":
+                from cupyx.scipy import ndimage
+
                 filtered = ndimage.median_filter(x, size=(1, 3, 3), mode="nearest")
             else:
                 filtered = _tv_chambolle(x, cp)

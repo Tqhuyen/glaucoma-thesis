@@ -322,6 +322,66 @@ def test_backend_parity(cp, name):
     assert backend.last_seconds > 0
 
 
+@pytest.mark.parametrize("shape", [(4, 1, 1), (3, 2, 4), (8, 200, 200)])
+def test_gaussian_float_and_uint8_exact(cp, shape):
+    from scipy.ndimage import gaussian_filter
+
+    raw = np.random.default_rng(721).integers(0, 256, shape, dtype=np.uint8)
+    backend = suite.get_backend("gaussian")
+    image = raw.astype(np.float32) / 255.0
+    expected = gaussian_filter(image, (0, 1.5, 1.5), mode="nearest", truncate=4.0)
+    actual = cp.asnumpy(backend.engine(cp.asarray(image)))
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(cp.asnumpy(backend(raw)), np.clip(expected * 255.0, 0, 255).astype(np.uint8))
+    assert backend.metadata["implementation"] == "scripts.denoise_cuda_suite._CudaGaussian"
+    assert len(backend.metadata["coefficients_sha256"]) == 64
+
+
+def test_gaussian_all_uint8_constants(cp):
+    from scipy.ndimage import gaussian_filter
+
+    raw = np.broadcast_to(np.arange(256, dtype=np.uint8)[:, None, None], (256, 7, 9)).copy()
+    expected = gaussian_filter(raw.astype(np.float32) / 255.0, (0, 1.5, 1.5), mode="nearest", truncate=4.0)
+    np.testing.assert_array_equal(
+        cp.asnumpy(suite.get_backend("gaussian")(raw)), np.clip(expected * 255.0, 0, 255).astype(np.uint8)
+    )
+
+
+def test_gaussian_kernel_in_implementation_hash(cp, monkeypatch):
+    before = suite.get_backend("gaussian").metadata["implementation_sha256"]
+    monkeypatch.setattr(suite, "_GAUSSIAN_KERNEL", suite._GAUSSIAN_KERNEL + "\n")
+    after = suite.get_backend("gaussian").metadata["implementation_sha256"]
+    assert before != after
+
+
+def test_gaussian_cached_oct_eight_full_slices(cp):
+    from scipy.ndimage import gaussian_filter
+
+    path = os.environ.get("DENOISE_GAUSSIAN_OCT_PATH")
+    if not path:
+        pytest.skip("Set DENOISE_GAUSSIAN_OCT_PATH to explicitly authorize reading a local cached volume")
+    volume = np.load(path, mmap_mode="r", allow_pickle=False)
+    assert volume.dtype == np.uint8 and volume.shape == (200, 200, 200)
+    indices = np.linspace(0, len(volume) - 1, 8, dtype=int)
+    raw = np.ascontiguousarray(volume[indices])
+    image = raw.astype(np.float32) / 255.0
+    expected = gaussian_filter(image, (0, 1.5, 1.5), mode="nearest", truncate=4.0)
+    backend = suite.get_backend("gaussian")
+    np.testing.assert_array_equal(cp.asnumpy(backend.engine(cp.asarray(image))), expected)
+    np.testing.assert_array_equal(cp.asnumpy(backend(raw)), np.clip(expected * 255.0, 0, 255).astype(np.uint8))
+    print(
+        json.dumps(
+            {
+                "oct_slices": indices.tolist(),
+                "shape": list(raw.shape),
+                "seconds": backend.last_seconds,
+                "mismatched_float32": 0,
+                "mismatched_uint8": 0,
+            }
+        )
+    )
+
+
 def test_tv_batched_independent_stopping(cp):
     from skimage.restoration import denoise_tv_chambolle
 
