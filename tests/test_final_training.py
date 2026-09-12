@@ -393,6 +393,20 @@ def test_notebook_bilateral_200_preset():
     assert namespace["NUM_WORKERS"] == 0
 
 
+def test_notebook_real_run_env_override(monkeypatch):
+    notebook = Path(__file__).resolve().parents[1] / "notebooks/3d_glaucoma_final_2x2d_3d_crossgate.ipynb"
+    cells = json.loads(notebook.read_text(encoding="utf-8"))["cells"]
+    source = next("".join(c["source"]) for c in cells if "RUN_GROUP = " in "".join(c["source"]))
+    for key in ("FINAL_REAL", "FINAL_RESUME", "FINAL_RUN_XAI", "FINAL_RUN_INFO"):
+        monkeypatch.setenv(key, "1")
+    namespace = {"SMOKE": False, "os": os}
+    exec(source.split("SMOKE_ROOT =")[0], namespace)
+    assert namespace["REAL_RUN"] and namespace["RESUME"]
+    assert all(namespace[k] for k in ("ENABLE_GPU_PREFLIGHT", "ENABLE_TRAIN", "ENABLE_EVAL"))
+    assert namespace["PUBLISH_DATA_CACHE"] and namespace["RUN_XAI"] and namespace["RUN_INFO"]
+    assert not namespace["ALLOW_BUILD_DENOISED"]
+
+
 def test_notebook_smoke_offline_end_to_end(monkeypatch):
     import sys
 

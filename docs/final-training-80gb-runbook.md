@@ -69,6 +69,8 @@ RUN_XAI = False
 
 Các cờ nằm trong cell Configuration; có thể đổi chúng bằng cell gán biến ngắn ngay trước section cần chạy, không phải chạy lại cả notebook. Không chạy lại Configuration chỉ để bật cờ nếu bạn vẫn cần giữ đối tượng đang train trong RAM.
 
+Cách nhanh cho run thật: đặt env trước khi chạy cell Configuration (ví dụ `%env FINAL_REAL=1`) — tự bật preflight/train/eval/publish; thêm `FINAL_RESUME=1` khi chạy tiếp, `FINAL_RUN_XAI=1`/`FINAL_RUN_INFO=1` nếu muốn XAI/information theory. `REAL_RUN=True` hoặc `RESUME=True` gán trực tiếp trong cell Configuration cũng tương đương.
+
 Sau khi dữ liệu đã được chuẩn bị và khôi phục trên runtime GPU, bật và chạy section 7 trước:
 
 ```python
