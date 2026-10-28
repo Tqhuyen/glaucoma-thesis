@@ -1,0 +1,4 @@
+# HTML in this repo is generated output, not source: scripts/visualize_oct_volume.py
+# writes a self-contained ~25 MB oct_slice_viewer.html (base64 slice atlases).
+# Keep it out of GitHub's language statistics.
+*.html linguist-generated
