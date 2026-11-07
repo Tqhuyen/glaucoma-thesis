@@ -39,6 +39,8 @@ IMAGE = (
         "tqdm",
         "pandas",
         "matplotlib",
+        "pynvml",
+        "psutil",
     )
     .run_commands(
         "git clone --depth 1 https://github.com/Tqhuyen/glaucoma-thesis.git /repo",
