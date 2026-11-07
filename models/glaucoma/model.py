@@ -94,6 +94,37 @@ class SimpleResidual3d(nn.Module):
         return self.act(x + self.norm(self.conv(x)))
 
 
+class DepthAttentionPool3d(nn.Module):
+    """Pool over H/W but learn a softmax weight over the depth (last) axis.
+
+    Glaucoma is driven by a thin RNFL band; global average pooling dilutes that
+    band with the rest of the A-scan. This scores every depth slice from the
+    feature map and pools the depth axis with those weights, keeping the
+    fine-layer contribution.
+    """
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.score = nn.Conv3d(channels, 1, kernel_size=1)
+
+    def forward(self, x):
+        w = torch.softmax(self.score(x).mean(dim=(3, 4)), dim=2)
+        z = (x * w.unsqueeze(-1).unsqueeze(-1)).sum(dim=2)
+        return z.mean(dim=(2, 3))
+
+
+def _make_pool(channels: int, kind: str = "gap", grid: int = 2) -> nn.Module:
+    if kind == "depth_attention":
+        return DepthAttentionPool3d(channels)
+    if kind == "grid":
+        return nn.AdaptiveAvgPool3d(grid)
+    return nn.AdaptiveAvgPool3d(1)
+
+
+def _pooled_size(channels: int, kind: str = "gap", grid: int = 2) -> int:
+    return channels * (grid**3 if kind == "grid" else 1)
+
+
 class Pyramid3DCNN(nn.Module):
     """Multi-scale (FPN-style) 3D CNN for OCT glaucoma classification.
 
@@ -126,6 +157,8 @@ class Pyramid3DCNN(nn.Module):
         residual=True,
         fusion_dim=64,
         fuse_levels=3,
+        head_pool="gap",
+        head_grid=2,
     ):
         super().__init__()
         hidden = tuple(hidden)
@@ -173,8 +206,9 @@ class Pyramid3DCNN(nn.Module):
                 )
             )
 
-        head_in = sum(hidden[: self.fuse_start]) + fusion_dim * self.fuse_levels
-        self.pool = nn.AdaptiveAvgPool3d(1)
+        head_channels = list(hidden[: self.fuse_start]) + [fusion_dim] * self.fuse_levels
+        head_in = sum(_pooled_size(c, head_pool, head_grid) for c in head_channels)
+        self.head_pools = nn.ModuleList([_make_pool(c, head_pool, head_grid) for c in head_channels])
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(head_in, 64),
@@ -190,17 +224,16 @@ class Pyramid3DCNN(nn.Module):
             x = pool(stage(x))
             feats.append(x)
 
-        parts = []
         if self.fuse_levels:
             fused = [lat(f) for lat, f in zip(self.laterals, feats[self.fuse_start :])]
             for j in range(len(fused) - 2, -1, -1):
                 up = F.interpolate(fused[j + 1], size=fused[j].shape[-3:], mode="trilinear", align_corners=False)
                 fused[j] = self.smooths[j](fused[j] + up)
-            parts += [self.pool(f) for f in feats[: self.fuse_start]]
-            parts += [self.pool(f) for f in fused]
+            ordered = list(feats[: self.fuse_start]) + fused
         else:
-            parts = [self.pool(f) for f in feats]
+            ordered = feats
 
+        parts = [pool(f) for pool, f in zip(self.head_pools, ordered)]
         logits = self.classifier(torch.cat([p.flatten(1) for p in parts], dim=1))
         return {"logits": logits}
 
@@ -259,6 +292,8 @@ class PyramidResNeXt3D(nn.Module):
         fusion_dim=128,
         fuse_levels=3,
         norm_groups=8,
+        head_pool="gap",
+        head_grid=2,
     ):
         super().__init__()
         features = tuple(features)
@@ -299,8 +334,9 @@ class PyramidResNeXt3D(nn.Module):
                 )
             )
 
-        head_in = sum(features[: self.fuse_start]) + fusion_dim * self.fuse_levels
-        self.pool = nn.AdaptiveAvgPool3d(1)
+        head_channels = list(features[: self.fuse_start]) + [fusion_dim] * self.fuse_levels
+        head_in = sum(_pooled_size(c, head_pool, head_grid) for c in head_channels)
+        self.head_pools = nn.ModuleList([_make_pool(c, head_pool, head_grid) for c in head_channels])
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(head_in, 64),
@@ -316,17 +352,16 @@ class PyramidResNeXt3D(nn.Module):
             feats.append(refine(downsample(x)))
             x = feats[-1]
 
-        parts = []
         if self.fuse_levels:
             fused = [lat(f) for lat, f in zip(self.laterals, feats[self.fuse_start :])]
             for j in range(len(fused) - 2, -1, -1):
                 up = F.interpolate(fused[j + 1], size=fused[j].shape[-3:], mode="trilinear", align_corners=False)
                 fused[j] = self.smooths[j](fused[j] + up)
-            parts += [self.pool(f) for f in feats[: self.fuse_start]]
-            parts += [self.pool(f) for f in fused]
+            ordered = list(feats[: self.fuse_start]) + fused
         else:
-            parts = [self.pool(f) for f in feats]
+            ordered = feats
 
+        parts = [pool(f) for pool, f in zip(self.head_pools, ordered)]
         logits = self.classifier(torch.cat([p.flatten(1) for p in parts], dim=1))
         return {"logits": logits}
 
@@ -448,6 +483,8 @@ def build_model(cfg):
             residual=mcfg.get("residual", True),
             fusion_dim=mcfg.get("fusion_dim", 64),
             fuse_levels=mcfg.get("fuse_levels", 3),
+            head_pool=mcfg.get("head_pool", "gap"),
+            head_grid=mcfg.get("head_grid", 2),
         )
     if architecture == "pyramid_resnext3d":
         return PyramidResNeXt3D(
@@ -459,6 +496,8 @@ def build_model(cfg):
             fusion_dim=mcfg.get("fusion_dim", 128),
             fuse_levels=mcfg.get("fuse_levels", 3),
             norm_groups=mcfg.get("norm_groups", 8),
+            head_pool=mcfg.get("head_pool", "gap"),
+            head_grid=mcfg.get("head_grid", 2),
         )
     if architecture == "swinunetr":
         shape = cfg.get("data", {}).get("model_input_shape")

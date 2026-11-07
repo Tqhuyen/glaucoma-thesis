@@ -58,6 +58,8 @@ _OPTIONAL_SCHEMA = [
     ("model.fusion_dim", (int,), lambda v: 8 <= v <= 512),
     ("model.fuse_levels", (int,), lambda v: 0 <= v <= 8),
     ("model.groups", (int,), lambda v: 1 <= v <= 64),
+    ("model.head_pool", (str,), lambda v: v in ("gap", "grid", "depth_attention")),
+    ("model.head_grid", (int,), lambda v: 2 <= v <= 4),
     ("model.base_width", (int,), lambda v: 1 <= v <= 64),
     ("model.norm", (str,), lambda v: v in ("group", "batch")),
     ("model.residual", (bool,), None),

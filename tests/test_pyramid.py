@@ -125,3 +125,23 @@ def test_resnext_keeps_depth_at_first_stage():
 
 def test_resnext_config_validates():
     validate_config(_config(architecture="pyramid_resnext3d", groups=8, base_width=8))
+
+
+@pytest.mark.parametrize("head_pool", ["gap", "grid", "depth_attention"])
+def test_thin_feature_heads(head_pool):
+    model = _model(head_pool=head_pool)
+    logits = model(torch.randn(2, 1, 24, 24, 24))["logits"]
+    assert logits.shape == (2, 2)
+    torch.nn.functional.cross_entropy(logits, torch.tensor([0, 1])).backward()
+    grads = [p.grad for p in model.parameters() if p.requires_grad]
+    assert all(g is not None and torch.isfinite(g).all() for g in grads)
+
+
+@pytest.mark.parametrize("head_pool", ["gap", "grid", "depth_attention"])
+def test_thin_feature_heads_resnext(head_pool):
+    model = _resnext(head_pool=head_pool)
+    logits = model(torch.randn(2, 1, 32, 32, 32))["logits"]
+    assert logits.shape == (2, 2)
+    torch.nn.functional.cross_entropy(logits, torch.tensor([0, 1])).backward()
+    grads = [p.grad for p in model.parameters() if p.requires_grad]
+    assert all(g is not None and torch.isfinite(g).all() for g in grads)

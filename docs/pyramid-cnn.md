@@ -69,6 +69,21 @@ sau nhỏ, compute thấp hơn pyramid CNN thuần ở cùng 96³.
 Chạy: kernel `trnquanghuyn/glaucoma-pyramid-resnext-bilateral96`, 15 epoch, batch 4 × accum 2,
 lr 1e-4, seed 42; so trực tiếp với `single3d-resxt3d` (77,11% test) và run pyramid 96³ (74,00%).
 
+## 2c. Head giữ đặc trưng mảnh (`head_pool`)
+
+GAP toàn cục làm loãng dải RNFL mỏng với phần còn lại của A-scan. Hai chế độ thay thế
+(config `model.head_pool`, áp dụng cho cả `Pyramid3DCNN` và `PyramidResNeXt3D`):
+
+- `gap` (mặc định): `AdaptiveAvgPool3d(1)` như cũ.
+- `depth_attention`: một conv 1×1 chấm điểm từng slice depth (trục cuối), softmax theo depth
+  rồi pool có trọng số, sau đó trung bình H/W. Model tự chọn dải mỏng thay vì chia đều.
+- `grid`: `AdaptiveAvgPool3d(head_grid)` (mặc định 2×2×2) → giữ **vị trí** tổn thương thay vì
+  xoá bố cục; head rộng ×`head_grid³`.
+
+Chạy thử head mảnh trên cùng 96³: `model.head_pool=depth_attention` (kernel
+`trnquanghuyn/glaucoma-pyramid-thinhead-bilateral96`, 12 epoch) — so với run GAP 96³ (74,00%)
+và baseline matched (72,00%).
+
 ## 3. Cấu hình
 
 `configs/glaucoma.yaml` là config glaucoma duy nhất (raw 200³). Hai khóa mới có mặt với giá trị
