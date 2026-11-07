@@ -135,7 +135,7 @@ def train(
         f"data.data_dir={data_dir}",
         "logging.wandb=true",
         "logging.tensorboard=true",
-        f"output_dir={OUT / run_name}",
+        f"output_dir={OUT}",
         f"model.head_pool={head_pool}",
         f"model.fusion_dim={fusion_dim}",
         "train.lr=0.0001",
