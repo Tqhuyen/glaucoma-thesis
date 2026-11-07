@@ -159,6 +159,7 @@ Confusion (suy ra từ precision/recall + 489 dương / 411 âm): TP 343, FP 88,
 |---|---:|---:|---:|---:|
 | `Pyramid3DCNN` (run này) | **74,00%** | 74,37% | 73,99% | 0,486 |
 | `PyramidResNeXt3D` (run này) | **74,67%** | **75,54%** | **74,63%** | **0,515** |
+| `Pyramid3DCNN` aniso 96×96×200 (depth 200) | 73,11% | 73,55% | 73,11% | 0,470 |
 | `Simple3DCNN` (matched, cùng recipe) | 72,00% | 72,58% | 72,00% | 0,452 |
 | `single3d-cnn3d` (tham chiếu sweep) | 74,44% | — | 77,41% | 0,483 |
 | `single3d-resxt3d` (tham chiếu sweep) | **77,11%** | 77,19% | **78,36%** | **0,542** |
@@ -172,6 +173,11 @@ acc, +0,034 MCC**; `PyramidResNeXt3D` (grouped bottleneck + FPN) thêm **+0,67 a
 điểm) nên chưa đủ khẳng định; `single3d-resxt3d` vẫn hơn run ResNeXt+FPN 2,4 điểm acc (khác recipe
 sweep). Với 1 seed, **top-down fusion chưa chứng minh được lợi ích riêng** — ablation
 `fuse_levels=0` bị hoãn để dành quota cho resolution/ResNeXt.
+
+**Aniso 96×96×200 (giữ depth 200):** test acc 73,11%, balanced 73,55%, MCC 0,470 — **không hơn**
+96³ (74,00 / 74,37 / 0,486; chênh trong 1 SE). 10 epoch, best val step 2600 (loss 0,5232); test
+vẫn tăng chậm (71,2% → 73,2% → 73,1%) nhưng xu hướng không cho thấy mất mẫu trục depth là nút thắt.
+⇒ Hướng "đặc trưng mảnh" nên dồn vào **head/auxiliary RNFLT**, không phải lưu trữ depth.
 
 Test đạt 70,9% ở step 600, 73,8% ở step 1200 rồi dao động 72–74% đến step 2300 ⇒ **plateau từ
 ~4,5 epoch**; kéo dài schedule không phải đòn bẩy chính. Lưu ý val chỉ 300 mẫu (SE ≈ 2,6 điểm),
