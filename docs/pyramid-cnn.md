@@ -140,16 +140,22 @@ Confusion (suy ra từ precision/recall + 489 dương / 411 âm): TP 343, FP 88,
 
 **So sánh tham chiếu** (cùng nhóm 96³ trong `3d-backbone-sweep.md`, không cùng recipe):
 
-| Model | Test acc | Test F1 | MCC |
-|---|---:|---:|---:|
-| `Pyramid3DCNN` (run này) | 74,00% | 73,99% | 0,486 |
-| `single3d-cnn3d` (Simple3DCNN) | 74,44% | 77,41% | 0,483 |
-| `single3d-resxt3d` | **77,11%** | **78,36%** | **0,542** |
+| Model | Test acc | Balanced acc | Test F1 | MCC |
+|---|---:|---:|---:|---:|
+| `Pyramid3DCNN` (run này) | **74,00%** | **74,37%** | **73,99%** | **0,486** |
+| `Simple3DCNN` (matched, cùng recipe) | 72,00% | 72,58% | 72,00% | 0,452 |
+| `single3d-cnn3d` (tham chiếu sweep) | 74,44% | — | 77,41% | 0,483 |
+| `single3d-resxt3d` (tham chiếu sweep) | **77,11%** | 77,19% | **78,36%** | **0,542** |
 
-**Đọc kết quả:** pyramid ngang `Simple3DCNN` về accuracy/MCC (chênh −0,44 điểm acc, +0,003 MCC)
-và thấp hơn F1; kém ResNeXt3D ~3,1 điểm acc. Với 1 seed và early stop ở 8,7 epoch, **chưa có
-bằng chứng top-down fusion tạo lợi ích**; cần baseline cùng recipe + ablation `fuse_levels=0`
-(đang chạy) mới tách được đóng góp của FPN so với multi-scale head.
+Baseline matched: kernel `trnquanghuyn/glaucoma-simple3dcnn-bilateral96` (cùng 96³, bs 4 × accum 2,
+15 epoch, early stop step 2390; test 72,00%; TP 322, FP 85, FN 167, TN 326).
+
+**Đọc kết quả:** với **cùng recipe**, pyramid hơn `Simple3DCNN` **+2,0 điểm acc, +1,8 điểm balanced
+acc, +0,034 MCC** — hướng nhất quán nhưng 1 seed và test 900 mẫu (SE của hiệu ≈ 2,1 điểm) nên chưa
+đủ để khẳng định; cần thêm seed. So với `single3d-resxt3d` vẫn kém 3,1 điểm acc. Với 1 seed và
+early stop ở 8,7 epoch, **chưa có bằng chứng top-down fusion tạo lợi ích**; cần baseline cùng recipe
++ ablation `fuse_levels=0` để tách đóng góp FPN so với multi-scale head (ablation đã bị hoãn để
+dành quota cho resolution/ResNeXt).
 
 Test đạt 70,9% ở step 600, 73,8% ở step 1200 rồi dao động 72–74% đến step 2300 ⇒ **plateau từ
 ~4,5 epoch**; kéo dài schedule không phải đòn bẩy chính. Lưu ý val chỉ 300 mẫu (SE ≈ 2,6 điểm),
