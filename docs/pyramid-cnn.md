@@ -145,9 +145,15 @@ nên "best val" ở step 1700 là chọn theo nhiễu; test 900 mẫu có CI95 �
    - `fuse_levels=0`: chỉ multi-scale head (không top-down) → đo giá trị của FPN.
    - `fuse_levels=2`: bỏ lateral 24×24 (giảm VRAM) → kiểm tra level mịn có cần fuse không.
    - `fusion_dim=32`: kiểm tra head rộng có phải nguồn lợi ích.
-3. Báo cáo **balanced accuracy, MCC, AUC, F1** cùng accuracy; test lệch lớp 411/489 nên
+3. **Anisotropic 96×96×200** (đang chờ slot): giữ nguyên depth 200, chỉ downsample H/W về 96
+   từ raw 200³ trên Kaggle, rồi train cùng recipe (10 epoch, batch 4 × accum 2, seed 42).
+   Storage ~6,1 GB thay vì 26,4 GB, nhưng lúc build vẫn phải tải raw 200³ (đỉnh scratch ~21 GB).
+   Đây là phép so sánh sạch với run 96³: cùng H/W, chỉ khác mẫu trục depth — tách đúng giả thuyết
+   "mất chi tiết lớp mỏng khi resize". So test tại cùng epoch (96³: 73,8% ở epoch 10) và dùng
+   CI95 ±2,9 điểm để kết luận.
+4. Báo cáo **balanced accuracy, MCC, AUC, F1** cùng accuracy; test lệch lớp 411/489 nên
    accuracy đơn lẻ dễ gây kết luận sai. Loại model nếu dự đoán lệch một lớp (balanced acc ≈ 0.5).
-4. Ghi `sec/epoch` và peak VRAM từ W&B cạnh baseline để so chi phí.
+5. Ghi `sec/epoch` và peak VRAM từ W&B cạnh baseline để so chi phí.
 
 ## 7. Rủi ro
 
