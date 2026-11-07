@@ -157,7 +157,8 @@ Confusion (suy ra từ precision/recall + 489 dương / 411 âm): TP 343, FP 88,
 
 | Model | Test acc | Balanced acc | Test F1 | MCC |
 |---|---:|---:|---:|---:|
-| `Pyramid3DCNN` (run này) | **74,00%** | **74,37%** | **73,99%** | **0,486** |
+| `Pyramid3DCNN` (run này) | **74,00%** | 74,37% | 73,99% | 0,486 |
+| `PyramidResNeXt3D` (run này) | **74,67%** | **75,54%** | **74,63%** | **0,515** |
 | `Simple3DCNN` (matched, cùng recipe) | 72,00% | 72,58% | 72,00% | 0,452 |
 | `single3d-cnn3d` (tham chiếu sweep) | 74,44% | — | 77,41% | 0,483 |
 | `single3d-resxt3d` (tham chiếu sweep) | **77,11%** | 77,19% | **78,36%** | **0,542** |
@@ -166,16 +167,16 @@ Baseline matched: kernel `trnquanghuyn/glaucoma-simple3dcnn-bilateral96` (cùng 
 15 epoch, early stop step 2390; test 72,00%; TP 322, FP 85, FN 167, TN 326).
 
 **Đọc kết quả:** với **cùng recipe**, pyramid hơn `Simple3DCNN` **+2,0 điểm acc, +1,8 điểm balanced
-acc, +0,034 MCC** — hướng nhất quán nhưng 1 seed và test 900 mẫu (SE của hiệu ≈ 2,1 điểm) nên chưa
-đủ để khẳng định; cần thêm seed. So với `single3d-resxt3d` vẫn kém 3,1 điểm acc. Với 1 seed và
-early stop ở 8,7 epoch, **chưa có bằng chứng top-down fusion tạo lợi ích**; cần baseline cùng recipe
-+ ablation `fuse_levels=0` để tách đóng góp FPN so với multi-scale head (ablation đã bị hoãn để
-dành quota cho resolution/ResNeXt).
+acc, +0,034 MCC**; `PyramidResNeXt3D` (grouped bottleneck + FPN) thêm **+0,67 acc, +1,17 balanced,
++0,029 MCC** so với pyramid CNN. Hướng nhất quán nhưng 1 seed, test 900 mẫu (SE của hiệu ≈ 2,1
+điểm) nên chưa đủ khẳng định; `single3d-resxt3d` vẫn hơn run ResNeXt+FPN 2,4 điểm acc (khác recipe
+sweep). Với 1 seed, **top-down fusion chưa chứng minh được lợi ích riêng** — ablation
+`fuse_levels=0` bị hoãn để dành quota cho resolution/ResNeXt.
 
 Test đạt 70,9% ở step 600, 73,8% ở step 1200 rồi dao động 72–74% đến step 2300 ⇒ **plateau từ
 ~4,5 epoch**; kéo dài schedule không phải đòn bẩy chính. Lưu ý val chỉ 300 mẫu (SE ≈ 2,6 điểm),
 nên "best val" ở step 1700 là chọn theo nhiễu; test 900 mẫu có CI95 ≈ ±2,9 điểm — chênh lệch
-0,44 điểm so với `single3d-cnn3d` nằm trong nhiễu.
+2,0–2,7 điểm so với baseline matched vẫn nằm trong ~1,3 SE của hiệu.
 
 ## 6. Kế hoạch đọc kết quả
 
