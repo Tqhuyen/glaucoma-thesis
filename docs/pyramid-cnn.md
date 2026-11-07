@@ -66,17 +66,23 @@ Chạy pyramid bằng override (không tạo config resolution khác):
 ```bash
 python -m pipeline.train --cfg configs/glaucoma.yaml \
   --set model.architecture=pyramid3dcnn model.fusion_dim=64 model.fuse_levels=3 \
-        run_name=pyramid-raw200-s42
+        run_name=pyramid-bilateral96-s42
 ```
 
-Thực nghiệm chính chạy trên **Kaggle GPU**: `notebooks/3d_glaucoma_pyramid_200_kaggle.ipynb`
-(tải raw 200³ từ HF, batch 2 × grad-accum 4, 15 epoch, AMP fp16, log W&B + artifact).
+Thực nghiệm chính chạy trên **Kaggle GPU**: `notebooks/3d_glaucoma_pyramid_kaggle.ipynb`
+(Bilateral-96 từ HF, batch 4 × grad-accum 2, 15 epoch, AMP fp16, log W&B + artifact).
 Notebook chỉ dùng GPU; không chạy train trên máy local.
+
+**Vì sao 96³ chứ không 200³:** đo thực tế trên T4 với raw 200³, batch 2 × accum 4 là
+**33 s/optimizer-step** (W&B `pyramid-raw200-s42`, 30 step đầu) ⇒ 263 step/epoch ≈ **2,4 h/epoch**,
+15 epoch ≈ **36 h** — vượt giới hạn session Kaggle (và gần gấp đôi quota GPU tuần). 96³ giảm
+compute ~(96/200)³ ≈ 0,11 ⇒ ~4 h cho 15 epoch, cùng nhóm so sánh 96³ của `3d-backbone-sweep.md`.
+Muốn thử 200³ chỉ nên chạy 2-3 epoch như cost/accuracy probe, không đủ để kết luận.
 
 Đo chi phí step/VRAM trên GPU:
 
 ```bash
-python scripts/bench_pyramid.py --res 200 --batch-sizes 1,2 --steps 3
+python scripts/bench_pyramid.py --res 96 --batch-sizes 1,2,4 --steps 3
 ```
 
 ## 4. Kiểm chứng đã chạy
@@ -92,11 +98,11 @@ python scripts/bench_pyramid.py --res 200 --batch-sizes 1,2 --steps 3
 
 ## 5. Kế hoạch đọc kết quả
 
-1. So với `simple3dcnn` **cùng 200³, cùng batch/lr/epoch, seed 42** (chạy lại baseline bằng
+1. So với `simple3dcnn` **cùng 96³, cùng batch/lr/epoch, seed 42** (chạy lại baseline bằng
    `--set model.architecture=simple3dcnn`).
 2. Ablation tách đóng góp:
    - `fuse_levels=0`: chỉ multi-scale head (không top-down) → đo giá trị của FPN.
-   - `fuse_levels=2`: bỏ lateral 50×50 (giảm VRAM) → kiểm tra level mịn có cần fuse không.
+   - `fuse_levels=2`: bỏ lateral 24×24 (giảm VRAM) → kiểm tra level mịn có cần fuse không.
    - `fusion_dim=32`: kiểm tra head rộng có phải nguồn lợi ích.
 3. Báo cáo **balanced accuracy, MCC, AUC, F1** cùng accuracy; test lệch lớp 411/489 nên
    accuracy đơn lẻ dễ gây kết luận sai. Loại model nếu dự đoán lệch một lớp (balanced acc ≈ 0.5).
@@ -104,8 +110,8 @@ python scripts/bench_pyramid.py --res 200 --batch-sizes 1,2 --steps 3
 
 ## 6. Rủi ro
 
-- **VRAM 200³**: stem 16×200³ và lateral 50×50×200×64 là các tensor lớn nhất. Nếu OOM trên
-  T4/P100: `fuse_levels=2`, batch 1 + grad-accum 8, hoặc `fusion_dim=32`.
+- **Chi phí 200³**: đo 33 s/step (T4) ⇒ không khả thi trong 12 h; nếu cần 200³ thật phải giảm
+  `fuse_levels`/`fusion_dim` hoặc chấp nhận 2-3 epoch. 96³ là cấu hình thực nghiệm chính.
 - **Overfit**: 2100 mẫu train, model 1.1M tham số; early stop patience 6, dropout 0.3, wd 0.01.
-- **Không so sánh trực tiếp** với các run 96³ khử nhiễu trong `3d-backbone-sweep.md` khi khác
+- **Không so sánh trực tiếp** với các run 200³ khử nhiễu trong `3d-backbone-sweep.md` khi khác
   resolution/tiền xử lý; chỉ dùng làm tham chiếu.
