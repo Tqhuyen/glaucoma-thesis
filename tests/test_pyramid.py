@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from models.glaucoma.model import Pyramid3DCNN
+from models.glaucoma.model import Pyramid3DCNN, PyramidResNeXt3D
 from pipeline.config import validate_config
 
 HIDDEN = (8, 16, 32, 64)
@@ -88,3 +88,40 @@ def test_pyramid_config_validates():
 def test_pyramid_config_rejects_bad_keys(overrides):
     with pytest.raises(ValueError, match="out of allowed range"):
         validate_config(_config(**overrides))
+
+
+def _resnext(**kwargs):
+    kwargs.setdefault("features", (8, 16, 32, 64))
+    kwargs.setdefault("groups", 4)
+    kwargs.setdefault("base_width", 8)
+    kwargs.setdefault("fusion_dim", 32)
+    kwargs.setdefault("fuse_levels", 3)
+    kwargs.setdefault("dropout", 0.0)
+    return PyramidResNeXt3D(**kwargs)
+
+
+@pytest.mark.parametrize("fuse_levels", [0, 2, 4])
+def test_resnext_forward_backward(fuse_levels):
+    model = _resnext(fuse_levels=fuse_levels)
+    x = torch.randn(2, 1, 32, 32, 32)
+    logits = model(x)["logits"]
+    assert logits.shape == (2, 2)
+    torch.nn.functional.cross_entropy(logits, torch.tensor([0, 1])).backward()
+    grads = [p.grad for p in model.parameters() if p.requires_grad]
+    assert all(g is not None and torch.isfinite(g).all() for g in grads)
+
+
+def test_resnext_keeps_depth_at_first_stage():
+    model = _resnext()
+    feats = []
+    for _, refine in model.stages:
+        refine.register_forward_hook(lambda _m, _i, out: feats.append(out))
+    model(torch.randn(1, 1, 32, 32, 32))
+    # stride (2,2,1) halves the first two axes and keeps the last (depth) at 32.
+    assert feats[0].shape == (1, 8, 16, 16, 32)
+    assert [f.shape[2] for f in feats] == [16, 8, 4, 2]
+    assert [f.shape[4] for f in feats] == [32, 16, 8, 4]
+
+
+def test_resnext_config_validates():
+    validate_config(_config(architecture="pyramid_resnext3d", groups=8, base_width=8))

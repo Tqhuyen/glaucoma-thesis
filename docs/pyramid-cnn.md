@@ -50,6 +50,25 @@ Shape với input `1×200×200×200`, `fuse_levels=3`:
 Tham số: **1,129,298** (pyramid, mặc định) vs **881,122** (`simple3dcnn`, cùng hidden) —
 +28%, chủ yếu ở lateral/smooth và head rộng hơn.
 
+## 2b. Biến thể `PyramidResNeXt3D` (ResNeXt + FPN)
+
+`PyramidResNeXt3D` giữ nguyên **block/stage của encoder thắng sweep** (`single3d-resxt3d`:
+grouped bottleneck, `features=(32,64,128,192)`, `groups=8`, `base_width=8`, GroupNorm,
+stride `(2,2,1)` rồi `(2,2,2)×3`) nhưng mở 4 level và gắn pyramid:
+
+- stem conv 3³ → 32 kênh tại độ phân giải gốc;
+- mỗi level: 1 block giảm mẫu + 1 block giữ mẫu (đúng chuỗi của `Enc3DResNeXt`);
+- lateral 1×1 → `fusion_dim` (mặc định 128) cho `fuse_levels` level cuối, top-down
+  trilinear + add + smooth 3³;
+- head GAP đa thang: level không fuse giữ kênh gốc, level fuse dùng `fusion_dim`;
+- `fuse_levels=0` = ResNeXt + multi-scale head (ablation).
+
+Tham số: **1,608M** (mặc định) vs 1,129M của `Pyramid3DCNN`. Vì block grouped và các level
+sau nhỏ, compute thấp hơn pyramid CNN thuần ở cùng 96³.
+
+Chạy: kernel `trnquanghuyn/glaucoma-pyramid-resnext-bilateral96`, 15 epoch, batch 4 × accum 2,
+lr 1e-4, seed 42; so trực tiếp với `single3d-resxt3d` (77,11% test) và run pyramid 96³ (74,00%).
+
 ## 3. Cấu hình
 
 `configs/glaucoma.yaml` là config glaucoma duy nhất (raw 200³). Hai khóa mới có mặt với giá trị

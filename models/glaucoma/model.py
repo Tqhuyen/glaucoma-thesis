@@ -205,6 +205,132 @@ class Pyramid3DCNN(nn.Module):
         return {"logits": logits}
 
 
+class _ResNeXtBlock3d(nn.Module):
+    """Grouped bottleneck residual block (mirrors ``scripts/final_model.ResXBlock3D``).
+
+    Keeps GroupNorm so batch 2-4 stays stable, and accepts an arbitrary stride so the
+    first stage can use (2,2,1) and keep depth resolution.
+    """
+
+    def __init__(self, cin, cout, stride=(1, 1, 1), groups=8, base_width=8, norm_groups=8):
+        super().__init__()
+        width = int(cout * base_width / 64.0) * groups
+        self.c1 = nn.Conv3d(cin, width, kernel_size=1, bias=False)
+        self.g1 = _norm3d(width, "group", norm_groups)
+        self.c2 = nn.Conv3d(width, width, kernel_size=3, stride=stride, padding=1, groups=groups, bias=False)
+        self.g2 = _norm3d(width, "group", norm_groups)
+        self.c3 = nn.Conv3d(width, cout, kernel_size=1, bias=False)
+        self.downsample = stride != (1, 1, 1) or cin != cout
+        if self.downsample:
+            self.sc = nn.Conv3d(cin, cout, kernel_size=1, stride=stride, bias=False)
+            self.sg = _norm3d(cout, "group", norm_groups)
+
+    def forward(self, x):
+        out = self.c3(F.relu(self.g2(self.c2(F.relu(self.g1(self.c1(x)))))))
+        if self.downsample:
+            x = self.sg(self.sc(x))
+        return F.relu(x + out)
+
+
+class PyramidResNeXt3D(nn.Module):
+    """ResNeXt3D backbone (grouped bottlenecks, GroupNorm) + FPN pyramid head.
+
+    Same stages/widths as ``scripts/final_model.Enc3DResNeXt`` (the winning
+    ``single3d-resxt3d`` encoder: features (32,64,128,192), strides
+    (2,2,1) then (2,2,2) x3), but every stage is exposed and merged top-down:
+
+      * level 0 keeps depth at the input resolution (stride (2,2,1));
+      * the last ``fuse_levels`` levels get 1x1 laterals, trilinear top-down
+        merge and a 3x3 smooth;
+      * the classifier concatenates global-pooled features from every level
+        (unfused raw, fused at ``fusion_dim``).
+
+    ``fuse_levels=0`` reduces it to the ResNeXt backbone plus a multi-scale head.
+    """
+
+    def __init__(
+        self,
+        in_channels=1,
+        num_classes=2,
+        dropout=0.3,
+        features=(32, 64, 128, 192),
+        groups=8,
+        base_width=8,
+        fusion_dim=128,
+        fuse_levels=3,
+        norm_groups=8,
+    ):
+        super().__init__()
+        features = tuple(features)
+        if len(features) < 2:
+            raise ValueError("PyramidResNeXt3D needs at least 2 levels")
+        self.fuse_levels = max(0, min(int(fuse_levels), len(features)))
+        self.fuse_start = len(features) - self.fuse_levels
+
+        self.stem = nn.Sequential(
+            nn.Conv3d(in_channels, features[0], kernel_size=3, padding=1, bias=False),
+            _norm3d(features[0], "group", norm_groups),
+            nn.ReLU(inplace=True),
+        )
+        self.stages = nn.ModuleList()
+        cin = features[0]
+        for i, cout in enumerate(features):
+            stride = (2, 2, 1) if i == 0 else (2, 2, 2)
+            self.stages.append(
+                nn.ModuleList(
+                    [
+                        _ResNeXtBlock3d(cin, cout, stride, groups, base_width, norm_groups),
+                        _ResNeXtBlock3d(cout, cout, (1, 1, 1), groups, base_width, norm_groups),
+                    ]
+                )
+            )
+            cin = cout
+
+        self.laterals = nn.ModuleList()
+        self.smooths = nn.ModuleList()
+        for i in range(self.fuse_start, len(features)):
+            self.laterals.append(nn.Conv3d(features[i], fusion_dim, kernel_size=1))
+        for _ in range(max(0, self.fuse_levels - 1)):
+            self.smooths.append(
+                nn.Sequential(
+                    nn.Conv3d(fusion_dim, fusion_dim, kernel_size=3, padding=1),
+                    _norm3d(fusion_dim, "group", norm_groups),
+                    nn.ReLU(inplace=True),
+                )
+            )
+
+        head_in = sum(features[: self.fuse_start]) + fusion_dim * self.fuse_levels
+        self.pool = nn.AdaptiveAvgPool3d(1)
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(head_in, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x):
+        feats = []
+        x = self.stem(x)
+        for downsample, refine in self.stages:
+            feats.append(refine(downsample(x)))
+            x = feats[-1]
+
+        parts = []
+        if self.fuse_levels:
+            fused = [lat(f) for lat, f in zip(self.laterals, feats[self.fuse_start :])]
+            for j in range(len(fused) - 2, -1, -1):
+                up = F.interpolate(fused[j + 1], size=fused[j].shape[-3:], mode="trilinear", align_corners=False)
+                fused[j] = self.smooths[j](fused[j] + up)
+            parts += [self.pool(f) for f in feats[: self.fuse_start]]
+            parts += [self.pool(f) for f in fused]
+        else:
+            parts = [self.pool(f) for f in feats]
+
+        logits = self.classifier(torch.cat([p.flatten(1) for p in parts], dim=1))
+        return {"logits": logits}
+
+
 class SwinUNETRClassifier(nn.Module):
     """SwinUNETR encoder turned into a classifier (decoder removed).
 
@@ -322,6 +448,17 @@ def build_model(cfg):
             residual=mcfg.get("residual", True),
             fusion_dim=mcfg.get("fusion_dim", 64),
             fuse_levels=mcfg.get("fuse_levels", 3),
+        )
+    if architecture == "pyramid_resnext3d":
+        return PyramidResNeXt3D(
+            in_channels=mcfg.get("input_channels", 1),
+            num_classes=mcfg.get("num_classes", 2),
+            dropout=mcfg.get("dropout", 0.3),
+            groups=mcfg.get("groups", 8),
+            base_width=mcfg.get("base_width", 8),
+            fusion_dim=mcfg.get("fusion_dim", 128),
+            fuse_levels=mcfg.get("fuse_levels", 3),
+            norm_groups=mcfg.get("norm_groups", 8),
         )
     if architecture == "swinunetr":
         shape = cfg.get("data", {}).get("model_input_shape")

@@ -57,6 +57,8 @@ _OPTIONAL_SCHEMA = [
     ("model.dropout", (float, int), lambda v: 0 <= v < 1),
     ("model.fusion_dim", (int,), lambda v: 8 <= v <= 512),
     ("model.fuse_levels", (int,), lambda v: 0 <= v <= 8),
+    ("model.groups", (int,), lambda v: 1 <= v <= 64),
+    ("model.base_width", (int,), lambda v: 1 <= v <= 64),
     ("model.norm", (str,), lambda v: v in ("group", "batch")),
     ("model.residual", (bool,), None),
     ("data.normalize", (str,), lambda v: v in ("minmax", "robust", "none")),
