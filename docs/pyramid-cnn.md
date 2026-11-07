@@ -202,3 +202,19 @@ nên "best val" ở step 1700 là chọn theo nhiễu; test 900 mẫu có CI95 �
 - **Overfit**: 2100 mẫu train, model 1.1M tham số; early stop patience 6, dropout 0.3, wd 0.01.
 - **Không so sánh trực tiếp** với các run 200³ khử nhiễu trong `3d-backbone-sweep.md` khi khác
   resolution/tiền xử lý; chỉ dùng làm tham chiếu.
+
+## 8. Fallback Modal (khi hết quota Kaggle)
+
+`scripts/modal_train.py` chạy cùng pipeline trên Modal (GPU T4), dùng Volume
+`glaucoma-thesis-vol` cho data/output và secret `glaucoma-secrets` (HF_TOKEN, WANDB_API_KEY):
+
+```bash
+python -m modal secret create glaucoma-secrets --from-dotenv .env --force
+python -m modal run scripts/modal_train.py --experiment smoke        # kiểm tra image/secret/GPU
+python -m modal run scripts/modal_train.py --experiment resnext      # ResNeXt + FPN, bilateral-96
+python -m modal run scripts/modal_train.py --experiment thinhead     # depth-attention head
+python -m modal run scripts/modal_train.py --experiment aniso96x200  # build + train 96x96x200
+```
+
+Mỗi hàm `train` log W&B như Kaggle và ghi `best_model.pt`/`metrics.jsonl`/`test_results.json`
+vào `/vol/outputs/<run>`; data được cache lại giữa các lần chạy.
