@@ -85,7 +85,7 @@ def prepare_bilateral96() -> str:
     return str(root)
 
 
-@app.function(image=IMAGE, volumes=VOLUMES, secrets=SECRETS, timeout=3 * 3600, ephemeral_disk=64 * 1024)
+@app.function(image=IMAGE, volumes=VOLUMES, secrets=SECRETS, timeout=3 * 3600)
 def prepare_aniso96x200() -> str:
     import numpy as np
     import torch
