@@ -96,10 +96,46 @@ python scripts/bench_pyramid.py --res 96 --batch-sizes 1,2,4 --steps 3
 - Toàn bộ `pytest tests` trên Windows có 38 test fail sẵn ở các module `test_final_*`
   (`OSError: could not get source code`, lỗi môi trường), không liên quan thay đổi này.
 
-## 5. Kế hoạch đọc kết quả
+## 5. Kết quả run 96³ (seed 42)
 
-1. So với `simple3dcnn` **cùng 96³, cùng batch/lr/epoch, seed 42** (chạy lại baseline bằng
-   `--set model.architecture=simple3dcnn`).
+Run: W&B `glaucoma-thesis/pyramid-bilateral96-s42` (kernel private
+`trnquanghuyn/glaucoma-pyramid-bilateral96`). Bilateral-96, batch 4 × grad-accum 2, lr 1e-4,
+tối đa 15 epoch, early stop patience 6. GPU T4, ~3,9 s/step, dừng ở step 2300 (≈8,7 epoch).
+
+- **Val tốt nhất:** step 1700 (≈6,5 epoch), loss **0,5222**, acc **76,67%**, F1 **76,05%**.
+- **Test (best model, 900 mẫu):**
+
+| Metric | Giá trị |
+|---|---:|
+| Loss | 0,5160 |
+| Accuracy | **74,00%** |
+| Balanced accuracy | **74,37%** |
+| MCC | **0,486** |
+| F1 (macro) | **73,99%** |
+| F1 (glaucoma +) | 74,57% |
+| Precision / Recall (glaucoma +) | 79,58% / 70,14% |
+
+Confusion (suy ra từ precision/recall + 489 dương / 411 âm): TP 343, FP 88, FN 146, TN 323.
+
+![Training curves](../figures/pyramid_bilateral96_s42_curves.png)
+
+**So sánh tham chiếu** (cùng nhóm 96³ trong `3d-backbone-sweep.md`, không cùng recipe):
+
+| Model | Test acc | Test F1 | MCC |
+|---|---:|---:|---:|
+| `Pyramid3DCNN` (run này) | 74,00% | 73,99% | 0,486 |
+| `single3d-cnn3d` (Simple3DCNN) | 74,44% | 77,41% | 0,483 |
+| `single3d-resxt3d` | **77,11%** | **78,36%** | **0,542** |
+
+**Đọc kết quả:** pyramid ngang `Simple3DCNN` về accuracy/MCC (chênh −0,44 điểm acc, +0,003 MCC)
+và thấp hơn F1; kém ResNeXt3D ~3,1 điểm acc. Với 1 seed và early stop ở 8,7 epoch, **chưa có
+bằng chứng top-down fusion tạo lợi ích**; cần baseline cùng recipe + ablation `fuse_levels=0`
+(đang chạy) mới tách được đóng góp của FPN so với multi-scale head.
+
+## 6. Kế hoạch đọc kết quả
+
+1. So với `simple3dcnn` **cùng 96³, cùng batch/lr/epoch, seed 42** (đã đẩy kernel
+   `trnquanghuyn/glaucoma-simple3dcnn-bilateral96`; chờ slot GPU).
 2. Ablation tách đóng góp:
    - `fuse_levels=0`: chỉ multi-scale head (không top-down) → đo giá trị của FPN.
    - `fuse_levels=2`: bỏ lateral 24×24 (giảm VRAM) → kiểm tra level mịn có cần fuse không.
@@ -108,7 +144,7 @@ python scripts/bench_pyramid.py --res 96 --batch-sizes 1,2,4 --steps 3
    accuracy đơn lẻ dễ gây kết luận sai. Loại model nếu dự đoán lệch một lớp (balanced acc ≈ 0.5).
 4. Ghi `sec/epoch` và peak VRAM từ W&B cạnh baseline để so chi phí.
 
-## 6. Rủi ro
+## 7. Rủi ro
 
 - **Chi phí 200³**: đo 33 s/step (T4) ⇒ không khả thi trong 12 h; nếu cần 200³ thật phải giảm
   `fuse_levels`/`fusion_dim` hoặc chấp nhận 2-3 epoch. 96³ là cấu hình thực nghiệm chính.
