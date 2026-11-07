@@ -132,6 +132,11 @@ và thấp hơn F1; kém ResNeXt3D ~3,1 điểm acc. Với 1 seed và early stop
 bằng chứng top-down fusion tạo lợi ích**; cần baseline cùng recipe + ablation `fuse_levels=0`
 (đang chạy) mới tách được đóng góp của FPN so với multi-scale head.
 
+Test đạt 70,9% ở step 600, 73,8% ở step 1200 rồi dao động 72–74% đến step 2300 ⇒ **plateau từ
+~4,5 epoch**; kéo dài schedule không phải đòn bẩy chính. Lưu ý val chỉ 300 mẫu (SE ≈ 2,6 điểm),
+nên "best val" ở step 1700 là chọn theo nhiễu; test 900 mẫu có CI95 ≈ ±2,9 điểm — chênh lệch
+0,44 điểm so với `single3d-cnn3d` nằm trong nhiễu.
+
 ## 6. Kế hoạch đọc kết quả
 
 1. So với `simple3dcnn` **cùng 96³, cùng batch/lr/epoch, seed 42** (đã đẩy kernel
