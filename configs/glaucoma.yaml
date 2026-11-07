@@ -13,6 +13,8 @@ model:
   pool_strides: [[2, 2, 1], [2, 2, 1], [2, 2, 1], [2, 2, 1]]
   pool_type: "max"
   residual: true
+  fusion_dim: 64
+  fuse_levels: 3
 
 data:
   data_dir: "glaucoma_all"

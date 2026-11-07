@@ -1,5 +1,6 @@
 """Config schema validation: every run fails in <1 second on a malformed config,
 never 20 minutes in. Checks presence AND type AND value ranges."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -54,6 +55,8 @@ _OPTIONAL_SCHEMA = [
     ("logging.plot_curves", (bool,), None),
     ("logging.drive_sync_dir", (str,), None),
     ("model.dropout", (float, int), lambda v: 0 <= v < 1),
+    ("model.fusion_dim", (int,), lambda v: 8 <= v <= 512),
+    ("model.fuse_levels", (int,), lambda v: 0 <= v <= 8),
     ("model.norm", (str,), lambda v: v in ("group", "batch")),
     ("model.residual", (bool,), None),
     ("data.normalize", (str,), lambda v: v in ("minmax", "robust", "none")),
@@ -92,10 +95,7 @@ def validate_config(cfg: dict) -> None:
             errors.append(f"{dotted}: expected {types}, got bool ({val!r})")
             continue
         if not isinstance(val, types):
-            errors.append(
-                f"{dotted}: expected {[t.__name__ for t in types]}, "
-                f"got {type(val).__name__} ({val!r})"
-            )
+            errors.append(f"{dotted}: expected {[t.__name__ for t in types]}, got {type(val).__name__} ({val!r})")
             continue
         if check is not None and not check(val):
             errors.append(f"{dotted}: value {val!r} out of allowed range")
@@ -110,10 +110,7 @@ def validate_config(cfg: dict) -> None:
             errors.append(f"{dotted}: expected {types}, got bool ({val!r})")
             continue
         if not isinstance(val, types):
-            errors.append(
-                f"{dotted}: expected {[t.__name__ for t in types]}, "
-                f"got {type(val).__name__} ({val!r})"
-            )
+            errors.append(f"{dotted}: expected {[t.__name__ for t in types]}, got {type(val).__name__} ({val!r})")
             continue
         if check is not None and not check(val):
             errors.append(f"{dotted}: value {val!r} out of allowed range")

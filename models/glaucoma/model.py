@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def _norm3d(channels: int, kind: str = "group", groups: int = 8) -> nn.Module:
@@ -91,6 +92,117 @@ class SimpleResidual3d(nn.Module):
 
     def forward(self, x):
         return self.act(x + self.norm(self.conv(x)))
+
+
+class Pyramid3DCNN(nn.Module):
+    """Multi-scale (FPN-style) 3D CNN for OCT glaucoma classification.
+
+    Same resolution/optimization fixes as ``Simple3DCNN`` (GroupNorm,
+    anisotropic (2,2,1) pooling so the thin RNFL layer survives, residual
+    blocks), plus a feature pyramid:
+
+      * every stage produces a level at half the previous H/W, full depth;
+      * the coarsest ``fuse_levels`` levels get a 1x1 lateral projection and
+        are merged top-down (trilinear upsample + add + 3x3 smooth), so coarse
+        globe shape semantics are injected into the finer levels;
+      * the classifier sees every level after global pooling (unfused levels
+        raw, fused levels at ``fusion_dim``), i.e. both fine RNFL detail and
+        global geometry.
+
+    ``fuse_levels=0`` disables the top-down path and leaves a plain
+    multi-scale pooled head (ablation).
+    """
+
+    def __init__(
+        self,
+        in_channels=1,
+        num_classes=2,
+        dropout=0.3,
+        hidden=(16, 32, 64, 128),
+        norm="group",
+        norm_groups=8,
+        pool_strides=((2, 2, 1), (2, 2, 1), (2, 2, 1), (2, 2, 1)),
+        pool_type="max",
+        residual=True,
+        fusion_dim=64,
+        fuse_levels=3,
+    ):
+        super().__init__()
+        hidden = tuple(hidden)
+        if len(hidden) < 2:
+            raise ValueError("Pyramid3DCNN needs at least 2 pyramid levels")
+        strides = [tuple(s) for s in pool_strides]
+        if len(strides) != len(hidden):
+            strides = [(2, 2, 1)] * len(hidden)
+        self.fuse_levels = max(0, min(int(fuse_levels), len(hidden)))
+        self.fuse_start = len(hidden) - self.fuse_levels
+
+        self.stem = nn.Sequential(
+            nn.Conv3d(in_channels, hidden[0], kernel_size=3, padding=1),
+            _norm3d(hidden[0], norm, norm_groups),
+            nn.ReLU(inplace=True),
+        )
+
+        stages = []
+        cin = hidden[0]
+        for i, cout in enumerate(hidden):
+            block = []
+            if i > 0:
+                block += [
+                    nn.Conv3d(cin, cout, kernel_size=3, padding=1),
+                    _norm3d(cout, norm, norm_groups),
+                    nn.ReLU(inplace=True),
+                ]
+            if residual:
+                block.append(SimpleResidual3d(cout, norm, norm_groups))
+            stages.append(nn.Sequential(*block))
+            cin = cout
+        self.stages = nn.ModuleList(stages)
+        self.pools = nn.ModuleList([_pool3d(pool_type, s) for s in strides])
+
+        self.laterals = nn.ModuleList()
+        self.smooths = nn.ModuleList()
+        for i in range(self.fuse_start, len(hidden)):
+            self.laterals.append(nn.Conv3d(hidden[i], fusion_dim, kernel_size=1))
+        for _ in range(max(0, self.fuse_levels - 1)):
+            self.smooths.append(
+                nn.Sequential(
+                    nn.Conv3d(fusion_dim, fusion_dim, kernel_size=3, padding=1),
+                    _norm3d(fusion_dim, norm, norm_groups),
+                    nn.ReLU(inplace=True),
+                )
+            )
+
+        head_in = sum(hidden[: self.fuse_start]) + fusion_dim * self.fuse_levels
+        self.pool = nn.AdaptiveAvgPool3d(1)
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(head_in, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x):
+        feats = []
+        x = self.stem(x)
+        for stage, pool in zip(self.stages, self.pools):
+            x = pool(stage(x))
+            feats.append(x)
+
+        parts = []
+        if self.fuse_levels:
+            fused = [lat(f) for lat, f in zip(self.laterals, feats[self.fuse_start :])]
+            for j in range(len(fused) - 2, -1, -1):
+                up = F.interpolate(fused[j + 1], size=fused[j].shape[-3:], mode="trilinear", align_corners=False)
+                fused[j] = self.smooths[j](fused[j] + up)
+            parts += [self.pool(f) for f in feats[: self.fuse_start]]
+            parts += [self.pool(f) for f in fused]
+        else:
+            parts = [self.pool(f) for f in feats]
+
+        logits = self.classifier(torch.cat([p.flatten(1) for p in parts], dim=1))
+        return {"logits": logits}
 
 
 class SwinUNETRClassifier(nn.Module):
@@ -196,6 +308,20 @@ def build_model(cfg):
             pool_strides=tuple(mcfg.get("pool_strides", ((2, 2, 1), (2, 2, 1), (2, 2, 1)))),
             pool_type=mcfg.get("pool_type", "max"),
             residual=mcfg.get("residual", True),
+        )
+    if architecture == "pyramid3dcnn":
+        return Pyramid3DCNN(
+            in_channels=mcfg.get("input_channels", 1),
+            num_classes=mcfg.get("num_classes", 2),
+            dropout=mcfg.get("dropout", 0.3),
+            hidden=tuple(mcfg.get("hidden", (16, 32, 64, 128))),
+            norm=mcfg.get("norm", "group"),
+            norm_groups=mcfg.get("norm_groups", 8),
+            pool_strides=tuple(mcfg.get("pool_strides", ((2, 2, 1), (2, 2, 1), (2, 2, 1), (2, 2, 1)))),
+            pool_type=mcfg.get("pool_type", "max"),
+            residual=mcfg.get("residual", True),
+            fusion_dim=mcfg.get("fusion_dim", 64),
+            fuse_levels=mcfg.get("fuse_levels", 3),
         )
     if architecture == "swinunetr":
         shape = cfg.get("data", {}).get("model_input_shape")
