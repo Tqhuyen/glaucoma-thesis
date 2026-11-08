@@ -75,6 +75,21 @@ def prepare_smoke() -> str:
 
 
 @app.function(image=IMAGE, volumes=VOLUMES, secrets=SECRETS, timeout=3600)
+def prepare_raw200() -> str:
+    root = DATA / "raw200"
+    root.mkdir(parents=True, exist_ok=True)
+    for split in ("Training", "Validation", "Test"):
+        vol = _hf_download(HF_REPO, f"{split}_volumes.npy")
+        lab = _hf_download(HF_REPO, f"{split}_labels.npy")
+        shutil.copyfile(vol, root / f"{split}_volumes.npy")
+        shutil.copyfile(lab, root / f"{split}_labels.npy")
+        for p in (vol, lab):
+            Path(p).unlink(missing_ok=True)
+    VOL.commit()
+    return str(root)
+
+
+@app.function(image=IMAGE, volumes=VOLUMES, secrets=SECRETS, timeout=3600)
 def prepare_bilateral96() -> str:
     root = DATA / "bilateral96"
     root.mkdir(parents=True, exist_ok=True)
@@ -117,7 +132,46 @@ def prepare_aniso96x200() -> str:
     return str(root)
 
 
-@app.function(image=IMAGE, gpu="T4", volumes=VOLUMES, secrets=SECRETS, timeout=4 * 3600)
+@app.function(image=IMAGE, gpu="T4", cpu=8, memory=32768, volumes=VOLUMES, secrets=SECRETS, timeout=900)
+def probe(architecture: str = "pyramid_resnext3d", batch_size: int = 2, steps: int = 3) -> dict:
+    import time
+
+    import torch
+
+    sys.path.insert(0, "/repo")
+    from models.glaucoma.model import build_model
+    from pipeline.utils import load_config
+
+    cfg = load_config("/repo/configs/glaucoma.yaml")
+    cfg["model"]["architecture"] = architecture
+    if architecture == "pyramid_resnext3d":
+        cfg["model"]["fusion_dim"] = 128
+    model = build_model(cfg).cuda().train()
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    x = torch.randn(batch_size, 1, 200, 200, 200, device="cuda")
+    y = torch.randint(0, 2, (batch_size,), device="cuda")
+    scaler = torch.cuda.amp.GradScaler(enabled=True)
+    for i in range(steps + 1):
+        if i == 1:
+            torch.cuda.synchronize()
+            started = time.perf_counter()
+        with torch.autocast("cuda", dtype=torch.float16):
+            loss = torch.nn.functional.cross_entropy(model(x)["logits"], y)
+        scaler.scale(loss).backward()
+        scaler.step(opt)
+        scaler.update()
+        opt.zero_grad(set_to_none=True)
+    torch.cuda.synchronize()
+    return {
+        "architecture": architecture,
+        "batch_size": batch_size,
+        "params_m": round(sum(p.numel() for p in model.parameters()) / 1e6, 3),
+        "sec_per_microbatch": round((time.perf_counter() - started) / steps, 2),
+        "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2),
+    }
+
+
+@app.function(image=IMAGE, gpu="T4", cpu=8, memory=32768, volumes=VOLUMES, secrets=SECRETS, timeout=8 * 3600)
 def train(
     run_name: str,
     architecture: str,
@@ -167,7 +221,15 @@ def main(
     epochs: int = 12,
     batch_size: int = 4,
     grad_accum: int = 2,
+    probe_batch: int = 2,
 ):
+    if experiment == "probe-resnext":
+        print(probe.remote(architecture="pyramid_resnext3d", batch_size=probe_batch))
+        return
+    if experiment == "probe-pyramid":
+        print(probe.remote(architecture="pyramid3dcnn", batch_size=probe_batch))
+        return
+
     if experiment == "smoke":
         data = prepare_smoke.remote()
         print(
@@ -184,7 +246,38 @@ def main(
         )
         return
 
-    data = prepare_bilateral96.remote() if experiment != "aniso96x200" else prepare_aniso96x200.remote()
+    if experiment.startswith("raw200"):
+        data = prepare_raw200.remote()
+    elif experiment == "raw200-resnext":
+        print(
+            train.remote(
+                run_name=run_name or "pyramid-resnext-raw200-s42",
+                architecture="pyramid_resnext3d",
+                data_dir=data,
+                epochs=epochs,
+                batch_size=batch_size,
+                grad_accum=grad_accum,
+                head_pool="gap",
+                fusion_dim=128,
+            )
+        )
+    elif experiment == "raw200-pyramid":
+        print(
+            train.remote(
+                run_name=run_name or "pyramid-raw200-s42",
+                architecture="pyramid3dcnn",
+                data_dir=data,
+                epochs=epochs,
+                batch_size=batch_size,
+                grad_accum=grad_accum,
+                head_pool="gap",
+                fusion_dim=64,
+            )
+        )
+    elif experiment == "aniso96x200":
+        data = prepare_aniso96x200.remote()
+    else:
+        data = prepare_bilateral96.remote()
     if experiment == "resnext":
         print(
             train.remote(
@@ -208,6 +301,32 @@ def main(
                 batch_size=batch_size,
                 grad_accum=grad_accum,
                 head_pool="depth_attention",
+                fusion_dim=64,
+            )
+        )
+    elif experiment == "raw200-resnext":
+        print(
+            train.remote(
+                run_name=run_name or "pyramid-resnext-raw200-s42",
+                architecture="pyramid_resnext3d",
+                data_dir=data,
+                epochs=epochs,
+                batch_size=batch_size,
+                grad_accum=grad_accum,
+                head_pool="gap",
+                fusion_dim=128,
+            )
+        )
+    elif experiment == "raw200-pyramid":
+        print(
+            train.remote(
+                run_name=run_name or "pyramid-raw200-s42",
+                architecture="pyramid3dcnn",
+                data_dir=data,
+                epochs=epochs,
+                batch_size=batch_size,
+                grad_accum=grad_accum,
+                head_pool="gap",
                 fusion_dim=64,
             )
         )
