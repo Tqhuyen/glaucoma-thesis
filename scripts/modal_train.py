@@ -265,101 +265,31 @@ def main(
         return
 
     if experiment.startswith("raw200"):
-        data = prepare_raw200.remote()
-    elif experiment == "raw200-resnext":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-resnext-raw200-s42",
-                architecture="pyramid_resnext3d",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="gap",
-                fusion_dim=128,
-            )
-        )
-    elif experiment == "raw200-pyramid":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-raw200-s42",
-                architecture="pyramid3dcnn",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="gap",
-                fusion_dim=64,
-            )
-        )
+        data = "raw200"
     elif experiment == "aniso96x200":
         data = prepare_aniso96x200.remote()
     else:
         data = prepare_bilateral96.remote()
-    if experiment == "resnext":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-resnext-bilateral96-s42",
-                architecture="pyramid_resnext3d",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="gap",
-                fusion_dim=128,
-            )
-        )
-    elif experiment == "thinhead":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-thinhead-bilateral96-s42",
-                architecture="pyramid3dcnn",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="depth_attention",
-                fusion_dim=64,
-            )
-        )
-    elif experiment == "raw200-resnext":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-resnext-raw200-s42",
-                architecture="pyramid_resnext3d",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="gap",
-                fusion_dim=128,
-            )
-        )
-    elif experiment == "raw200-pyramid":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-raw200-s42",
-                architecture="pyramid3dcnn",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="gap",
-                fusion_dim=64,
-            )
-        )
-    elif experiment == "aniso96x200":
-        print(
-            train.remote(
-                run_name=run_name or "pyramid-aniso96x200-s42",
-                architecture="pyramid3dcnn",
-                data_dir=data,
-                epochs=epochs,
-                batch_size=batch_size,
-                grad_accum=grad_accum,
-                head_pool="gap",
-                fusion_dim=64,
-            )
-        )
-    else:
+
+    specs = {
+        "resnext": ("pyramid_resnext3d", "pyramid-resnext-bilateral96-s42", 128, "gap"),
+        "thinhead": ("pyramid3dcnn", "pyramid-thinhead-bilateral96-s42", 64, "depth_attention"),
+        "raw200-resnext": ("pyramid_resnext3d", "pyramid-resnext-raw200-s42b", 128, "gap"),
+        "raw200-pyramid": ("pyramid3dcnn", "pyramid-raw200-s42b", 64, "gap"),
+        "aniso96x200": ("pyramid3dcnn", "pyramid-aniso96x200-s42", 64, "gap"),
+    }
+    if experiment not in specs:
         raise ValueError(f"unknown experiment: {experiment}")
+    architecture, default_run, fusion_dim, head_pool = specs[experiment]
+    print(
+        train.remote(
+            run_name=run_name or default_run,
+            architecture=architecture,
+            data_dir=data,
+            epochs=epochs,
+            batch_size=batch_size,
+            grad_accum=grad_accum,
+            head_pool=head_pool,
+            fusion_dim=fusion_dim,
+        )
+    )
