@@ -107,11 +107,12 @@ Thực nghiệm chính chạy trên **Kaggle GPU**: `notebooks/3d_glaucoma_pyram
 (Bilateral-96 từ HF, batch 4 × grad-accum 2, 15 epoch, AMP fp16, log W&B + artifact).
 Notebook chỉ dùng GPU; không chạy train trên máy local.
 
-**Vì sao 96³ chứ không 200³:** đo thực tế trên T4 với raw 200³, batch 2 × accum 4 là
-**33 s/optimizer-step** (W&B `pyramid-raw200-s42`, 30 step đầu) ⇒ 263 step/epoch ≈ **2,4 h/epoch**,
-15 epoch ≈ **36 h** — vượt giới hạn session Kaggle (và gần gấp đôi quota GPU tuần). 96³ giảm
-compute ~(96/200)³ ≈ 0,11 ⇒ ~4 h cho 15 epoch, cùng nhóm so sánh 96³ của `3d-backbone-sweep.md`.
-Muốn thử 200³ chỉ nên chạy 2-3 epoch như cost/accuracy probe, không đủ để kết luận.
+**Vì sao 96³ (tạm thời) và đính chính 200³:** lần đo đầu trên T4 cho 33 s/optimizer-step với
+raw 200³ — nhưng đó là **bf16 emulation** (torch≥2.4 trả `is_bf16_supported()=True` trên T4/P100
+rồi chạy bf16 bằng phần mềm, chậm ~10×). Sau khi sửa `resolve_amp_dtype` sang **fp16 native**,
+ResNeXt+FPN 200³ chạy **0,78 s/sample** (bs1, ~27 phút/epoch, 8 epoch ≈ 3,6h) trên Modal T4.
+Vì vậy 200³ là cấu hình chính từ đây; các run 96³ ở trên chỉ còn là tham chiếu lịch sử (và timing
+của chúng cũng bị ảnh hưởng bởi emulation).
 
 Đo chi phí step/VRAM trên GPU:
 
