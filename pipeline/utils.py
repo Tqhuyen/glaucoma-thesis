@@ -4,6 +4,7 @@
 3. Lost work on disconnect      -> atomic checkpoint save/load
 4. Wrong device / dtype         -> resolve_device(), resolve_amp_dtype()
 """
+
 from __future__ import annotations
 
 import os
@@ -82,6 +83,7 @@ def sample_system_metrics() -> dict[str, float]:
     m: dict[str, float] = {}
     try:
         import psutil
+
         vm = psutil.virtual_memory()
         m["sys/cpu_percent"] = float(psutil.cpu_percent(interval=None))
         m["sys/ram_used_gb"] = round(vm.used / 1e9, 2)
@@ -138,9 +140,13 @@ def resolve_device() -> torch.device:
 def resolve_amp_dtype(device: torch.device) -> torch.dtype | None:
     if device.type != "cuda":
         return None
-    if torch.cuda.is_bf16_supported():
-        return torch.bfloat16
-    return torch.float16
+    # torch>=2.4 reports bf16 as "supported" through emulation on pre-Ampere GPUs
+    # (T4/P100); the emulation is ~10x slower, so require native support.
+    try:
+        bf16 = torch.cuda.is_bf16_supported(including_emulation=False)
+    except TypeError:
+        bf16 = torch.cuda.is_bf16_supported() and torch.cuda.get_device_capability(device)[0] >= 8
+    return torch.bfloat16 if bf16 else torch.float16
 
 
 def atomic_save(state: dict[str, Any], path: Path) -> None:
@@ -167,6 +173,7 @@ def optimal_num_proc(cfg_value) -> int:
         return int(cfg_value)
     try:
         import psutil
+
         cores = psutil.cpu_count(logical=False) or os.cpu_count() or 2
     except ImportError:
         cores = os.cpu_count() or 2
@@ -216,6 +223,7 @@ def write_run_manifest(out_dir: Path) -> None:
         "world_size": int(os.environ.get("WORLD_SIZE", 1)),
     }
     import json
+
     (out_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2))
 
 

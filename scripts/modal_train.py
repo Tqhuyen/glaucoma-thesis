@@ -225,6 +225,7 @@ def train(
         overrides += ["train.epochs=1", "train.eval_every_steps=2", "train.eval_test_every_steps=4"]
     cmd += ["--set"] + overrides
     print(" ".join(cmd), flush=True)
+    subprocess.run(["git", "-C", "/repo", "pull", "--ff-only"], check=False)
     env = {**os.environ, "PYTHONPATH": "/repo", "HF_XET_HIGH_PERFORMANCE": "1"}
     subprocess.run(cmd, cwd="/repo", env=env, check=True)
     VOL.commit()
