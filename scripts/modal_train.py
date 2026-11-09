@@ -171,7 +171,7 @@ def probe(architecture: str = "pyramid_resnext3d", batch_size: int = 2, steps: i
     }
 
 
-@app.function(image=IMAGE, gpu="T4", cpu=8, memory=32768, volumes=VOLUMES, secrets=SECRETS, timeout=8 * 3600)
+@app.function(image=IMAGE, gpu="T4", cpu=8, memory=32768, volumes=VOLUMES, secrets=SECRETS, timeout=12 * 3600)
 def train(
     run_name: str,
     architecture: str,
@@ -183,6 +183,21 @@ def train(
     fusion_dim: int = 64,
     smoke: bool = False,
 ) -> dict:
+    if data_dir == "raw200":
+        local = Path("/tmp/raw200")
+        local.mkdir(parents=True, exist_ok=True)
+        for split in ("Training", "Validation", "Test"):
+            for name in (f"{split}_volumes.npy", f"{split}_labels.npy"):
+                dst = local / name
+                if not dst.exists():
+                    from huggingface_hub import hf_hub_download
+
+                    hf_hub_download(
+                        HF_REPO, name, repo_type="dataset", local_dir=str(local), token=os.environ["HF_TOKEN"]
+                    )
+        data_dir = str(local)
+        print("[data] raw200 ready on local disk", flush=True)
+
     overrides = [
         f"run_name={run_name}",
         f"model.architecture={architecture}",
@@ -201,6 +216,9 @@ def train(
         "train.save_every_steps=300",
         "train.early_stop_patience=6",
     ]
+    out_dir = OUT / run_name
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
     cmd = [sys.executable, "-m", "pipeline.train", "--cfg", "configs/glaucoma.yaml"]
     if smoke:
         cmd.append("--smoke")
