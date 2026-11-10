@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pipeline.utils import load_env_file  # noqa: E402
+from pipeline.utils import SecureStr, load_env_file, redact, secret_env  # noqa: E402
 
 IMAGE = "pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime"
 SUITE_URL = "https://raw.githubusercontent.com/Tqhuyen/glaucoma-thesis/master/scripts/vast_suite.sh"
@@ -31,16 +31,17 @@ def _session_key():
     except ImportError:
         return None
     path = Path(TFAKEY_FILE)
-    return path.read_text().strip() if path.exists() else None
+    return SecureStr(path.read_text()) if path.exists() and path.read_text().strip() else None
 
 
-def vast(args, key):
+def vast(args, key: SecureStr):
     exe = shutil.which("vastai")
     if exe is None:
         raise SystemExit("vastai CLI not found: pip install vastai")
     use = key if args[0] == "search" else (_session_key() or key)
-    out = subprocess.run([exe, "--api-key", use, *args], capture_output=True, text=True)
-    text = (out.stdout + out.stderr).replace(use, "***").replace(key, "***")
+    out = subprocess.run([exe, "--api-key", use.reveal(), *args], capture_output=True, text=True)
+    text = redact(out.stdout + out.stderr)
+    text = re.sub(r'("instance_api_key":\s*")[^"]+', r"\1***", text)
     if out.returncode != 0 or '"error": true' in text or "Failed with error" in text:
         raise SystemExit(f"vastai {' '.join(args[:2])} failed: {text.strip()[:400]}")
     return out.stdout if args[0] == "search" else text
@@ -74,10 +75,11 @@ def main():
     args = ap.parse_args()
 
     load_env_file()
-    missing = [k for k in ("VAST_API_KEY", "HF_TOKEN", "WANDB_API_KEY") if not os.environ.get(k)]
+    missing = [k for k in ("VAST_API_KEY", "HF_TOKEN", "WANDB_API_KEY") if not os.environ.get(k, "").strip()]
     if missing:
         raise SystemExit(f"missing in .env: {', '.join(missing)}")
-    key = os.environ["VAST_API_KEY"]
+    key = secret_env("VAST_API_KEY")
+    hf, wb = secret_env("HF_TOKEN"), secret_env("WANDB_API_KEY")
 
     offer = find_offer(key, args.disk, args.max_dph)
     if offer is None:
@@ -99,7 +101,7 @@ def main():
         return
 
     env = (
-        f"-e HF_TOKEN={os.environ['HF_TOKEN']} -e WANDB_API_KEY={os.environ['WANDB_API_KEY']} "
+        f"-e HF_TOKEN={hf.reveal()} -e WANDB_API_KEY={wb.reveal()} "
         f"-e MAX_MINUTES={max_minutes} -e EPOCHS={args.epochs} -e SUITE={args.suite.replace(' ', ',')}"
     )
     onstart = (
@@ -124,7 +126,7 @@ def main():
         ],
         key,
     )
-    print(re.sub(r'("instance_api_key":\s*")[^"]+', r"\1***", out.strip()) or "(empty response)")
+    print(out.strip() or "(empty response)")
     if "success" not in out.lower():
         raise SystemExit("create instance did not confirm success; check the vast.ai console before retrying")
     print("launched; follow progress in W&B project glaucoma-thesis (runs raw200-*-s42 / -s43)")

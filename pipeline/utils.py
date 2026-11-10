@@ -44,6 +44,64 @@ def load_env_file() -> None:
             break
 
 
+class SecureStr:
+    """A secret that never prints its value.
+
+    ``str()``, ``repr()``, f-strings and logging all show ``***…abcd`` (last 4 chars).
+    The real value is only available through ``.reveal()``, so every place that sends
+    the secret somewhere (HTTP header, subprocess arg, env var) is explicit.
+    Every instance is registered so ``redact()`` can scrub it from captured output.
+    """
+
+    __slots__ = ("_value",)
+    _registry: set[str] = set()
+
+    def __init__(self, value: str):
+        value = (value or "").strip()
+        if not value:
+            raise ValueError("SecureStr needs a non-empty secret")
+        self._value = value
+        SecureStr._registry.add(value)
+
+    def reveal(self) -> str:
+        return self._value
+
+    def masked(self) -> str:
+        return f"***{self._value[-4:]}" if len(self._value) > 8 else "***"
+
+    def __str__(self) -> str:
+        return self.masked()
+
+    __repr__ = __str__
+
+    def __format__(self, spec: str) -> str:
+        return self.masked()
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, SecureStr) and other._value == self._value
+
+    def __hash__(self) -> int:
+        return hash(("SecureStr", self._value))
+
+    def __reduce__(self):
+        raise TypeError("SecureStr cannot be pickled")
+
+
+def secret_env(name: str) -> SecureStr:
+    """Read a secret from the environment (after ``load_env_file()``) as a SecureStr."""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise KeyError(f"missing secret: {name}")
+    return SecureStr(value)
+
+
+def redact(text: str) -> str:
+    """Replace every registered SecureStr value in ``text`` with ``***``."""
+    for value in sorted(SecureStr._registry, key=len, reverse=True):
+        text = text.replace(value, "***")
+    return text
+
+
 def classification_metrics(preds, targets, num_classes: int = 2, eps: float = 1e-7) -> dict[str, float]:
     """Accuracy + macro and positive-class precision/recall/F1 from label tensors.
 

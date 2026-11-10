@@ -87,3 +87,26 @@ def test_sample_system_metrics_keys():
     assert "sys/ram_percent" in m
     assert "sys/ram_used_gb" in m
     assert "sys/disk_free_gb" in m
+
+
+def test_secure_str_never_prints_value():
+    import logging
+    import pickle
+
+    import pytest
+
+    from pipeline.utils import SecureStr, redact
+
+    secret = SecureStr("  hf_abcdefghijklmnopqrstuvwxyz1234\r\n")
+    value = "hf_abcdefghijklmnopqrstuvwxyz1234"
+    assert secret.reveal() == value
+    for rendered in (str(secret), repr(secret), f"{secret}", f"{secret!r}", "%s" % secret, str([secret])):
+        assert value not in rendered
+        assert rendered.endswith("1234") or rendered.endswith("1234]")
+    record = logging.LogRecord("t", logging.INFO, __file__, 1, "key=%s", (secret,), None)
+    assert value not in record.getMessage()
+    assert redact(f"Bearer {value} failed") == "Bearer *** failed"
+    with pytest.raises(TypeError):
+        pickle.dumps(secret)
+    with pytest.raises(ValueError):
+        SecureStr("   ")
