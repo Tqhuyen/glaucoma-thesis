@@ -34,27 +34,33 @@ repo = os.environ["RESULTS_REPO"]
 api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
 run = os.environ["RUN"]
 api.upload_folder(repo_id=repo, repo_type="model", folder_path=os.path.join(os.environ["OUT"], run),
-                  path_in_repo=f"runs/{run}", ignore_patterns=["checkpoints/*"],
-                  commit_message=f"{run} outputs")
+                  path_in_repo=f"runs/{run}", commit_message=f"{run} outputs, checkpoints, tensorboard")
 print(f"[suite] uploaded {run} -> hf://{repo}/runs/{run}", flush=True)
 PY
 }
 
-upload_log() {
-  python - <<'PY' || true
+upload_all() {
+  python - <<'PY' || echo "[suite] final upload failed"
+import glob
 import os
 from huggingface_hub import HfApi
 api = HfApi(token=os.environ["HF_TOKEN"])
 repo = os.environ["RESULTS_REPO"]
 api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
-api.upload_file(repo_id=repo, repo_type="model", path_or_fileobj=os.environ["LOG"],
-                path_in_repo="suite.log", commit_message="suite log")
+if os.path.isdir(os.environ["OUT"]):
+    api.upload_folder(repo_id=repo, repo_type="model", folder_path=os.environ["OUT"], path_in_repo="runs",
+                      commit_message="final sync of all runs")
+work = os.path.dirname(os.environ["LOG"])
+for path in [os.environ["LOG"], *glob.glob(os.path.join(work, "launch*.out"))]:
+    api.upload_file(repo_id=repo, repo_type="model", path_or_fileobj=path,
+                    path_in_repo=f"logs/{os.path.basename(path)}", commit_message="logs")
+print(f"[suite] final sync -> hf://{repo}", flush=True)
 PY
 }
 
 finish() {
   echo "[suite] finishing at $(date -u +%FT%TZ), elapsed $(( ($(date +%s) - START) / 60 )) min"
-  upload_log
+  upload_all
   if [ -n "${CONTAINER_ID:-}" ] && [ -n "${CONTAINER_API_KEY:-}" ]; then
     pip install -q vastai
     if vastai destroy instance "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY" 2>&1 | tee -a "$LOG" | grep -qiE "error|failed"; then
@@ -126,7 +132,8 @@ api = HfApi(token=os.environ["HF_TOKEN"])
 repo, out = os.environ["RESULTS_REPO"], os.environ["POST_OUT"]
 api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
 api.upload_folder(repo_id=repo, repo_type="model", folder_path=out, path_in_repo=f"post/{os.environ['POST_NAME']}",
-                  allow_patterns=["outputs/*", "executed.ipynb"], commit_message=f"{os.environ['POST_NAME']} outputs")
+                  allow_patterns=["outputs/**", "*.ipynb", "*.log", "*.csv", "*.json", "*.txt", "*.png"],
+                  commit_message=f"{os.environ['POST_NAME']} outputs, notebooks, logs")
 print(f"[suite] uploaded post task -> hf://{repo}/post/{os.environ['POST_NAME']}", flush=True)
 PY
   fi
