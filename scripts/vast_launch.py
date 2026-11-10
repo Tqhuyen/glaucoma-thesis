@@ -9,6 +9,7 @@ wall-clock cap derived from --budget is reached.
 """
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -71,6 +72,9 @@ def main():
     ap.add_argument("--max-dph", type=float, default=0.45)
     ap.add_argument("--epochs", type=int, default=8)
     ap.add_argument("--suite", default="raw200-resnext:42 raw200-simple:42 raw200-pyramid:42 raw200-resnext:43")
+    ap.add_argument("--post-task", default="", help="repo-relative script run after the suite, e.g. scripts/x.sh")
+    ap.add_argument("--post-name", default="post-task", help="folder name for post-task outputs on HF")
+    ap.add_argument("--results-repo", default="tqhuyen/glaucoma-raw200-runs", help="private HF repo for outputs")
     ap.add_argument("--launch", action="store_true")
     args = ap.parse_args()
 
@@ -102,8 +106,11 @@ def main():
 
     env = (
         f"-e HF_TOKEN={hf.reveal()} -e WANDB_API_KEY={wb.reveal()} "
-        f"-e MAX_MINUTES={max_minutes} -e EPOCHS={args.epochs} -e SUITE={args.suite.replace(' ', ',')}"
+        f"-e MAX_MINUTES={max_minutes} -e EPOCHS={args.epochs} -e SUITE={args.suite.replace(' ', ',')} "
+        f"-e RESULTS_REPO={args.results_repo}"
     )
+    if args.post_task:
+        env += f" -e POST_TASK={args.post_task} -e POST_NAME={args.post_name} -e POST_OUT=/workspace/post_task"
     onstart = (
         "bash -lc 'mkdir -p /workspace && cd /workspace && "
         "(command -v curl >/dev/null || (apt-get update -qq && apt-get install -y -qq curl)) && "
@@ -129,7 +136,14 @@ def main():
     print(out.strip() or "(empty response)")
     if "success" not in out.lower():
         raise SystemExit("create instance did not confirm success; check the vast.ai console before retrying")
-    print("launched; follow progress in W&B project glaucoma-thesis (runs raw200-*-s42 / -s43)")
+    contract = re.search(r'"new_contract":\s*(\d+)', out)
+    deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=max_minutes)
+    print(f"launched; outputs -> hf://{args.results_repo}; instance self-destroys by {deadline:%Y-%m-%dT%H:%M:%SZ}")
+    if contract:
+        print(
+            "start the local watchdog now:\n  python scripts/vast_watchdog.py "
+            f"--instance {contract.group(1)} --deadline {deadline:%Y-%m-%dT%H:%M:%SZ} --stale-min 45"
+        )
 
 
 if __name__ == "__main__":

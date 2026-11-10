@@ -92,7 +92,8 @@ def sync(key_file, info):
         key_file,
         info,
         'cd /workspace && tar czf - --exclude="*/checkpoints" --exclude="*/tb" $(ls -d training_runs suite.log '
-        "dl_lab_run/outputs dl_lab_run/executed.ipynb 2>/dev/null) 2>/dev/null",
+        "dl_lab_run/outputs dl_lab_run/executed.ipynb post_task/outputs post_task/executed.ipynb 2>/dev/null) "
+        "2>/dev/null",
         binary=True,
     )
     if rc != 0 or not data:
