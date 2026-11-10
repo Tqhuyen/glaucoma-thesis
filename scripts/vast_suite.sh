@@ -109,4 +109,26 @@ for item in $SUITE; do
   SEED="$seed" timeout "${remaining}s" bash scripts/vast_raw200.sh "$run" "$EPOCHS" 1 8 || echo "[suite] $run exited non-zero"
   upload_run "$run"
 done
+echo "[suite] training suite done"
+
+if [ -n "${POST_TASK:-}" ]; then
+  remaining=$(( DEADLINE - $(date +%s) ))
+  export POST_OUT="${POST_OUT:-$WORK/post_task}"
+  if [ "$remaining" -lt 1800 ]; then
+    echo "[suite] skip post task $POST_TASK: only $((remaining / 60)) min left under cap"
+  else
+    echo "[suite] post task $POST_TASK (cap ${remaining}s, out $POST_OUT)"
+    timeout "${remaining}s" bash "$POST_TASK" || echo "[suite] post task exited non-zero"
+    POST_NAME="${POST_NAME:-post-task}" python - <<'PY' || echo "[suite] post upload failed"
+import os
+from huggingface_hub import HfApi
+api = HfApi(token=os.environ["HF_TOKEN"])
+repo, out = os.environ["RESULTS_REPO"], os.environ["POST_OUT"]
+api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
+api.upload_folder(repo_id=repo, repo_type="model", folder_path=out, path_in_repo=f"post/{os.environ['POST_NAME']}",
+                  allow_patterns=["outputs/*", "executed.ipynb"], commit_message=f"{os.environ['POST_NAME']} outputs")
+print(f"[suite] uploaded post task -> hf://{repo}/post/{os.environ['POST_NAME']}", flush=True)
+PY
+  fi
+fi
 echo "[suite] done"
