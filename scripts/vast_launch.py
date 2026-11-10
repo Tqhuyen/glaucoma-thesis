@@ -34,24 +34,27 @@ def vast(args, key):
     return out.stdout
 
 
+def hourly_cost(offer, disk):
+    return offer["dph_total"] + offer.get("storage_cost", 0.0) * disk / 730.0
+
+
 def find_offer(key, disk, max_dph):
-    best = None
+    candidates = []
     for gpu in GPUS:
         query = (
             f"reliability>0.98 num_gpus=1 gpu_name={gpu} disk_space>={disk} cpu_ram>=32 "
-            "cpu_cores_effective>=8 cuda_vers>=12.1 inet_down>=200 rentable=True verified=True"
+            "cpu_cores_effective>=8 cuda_vers>=12.1 inet_down>=300 rentable=True verified=True "
+            "geolocation notin [CN,VN,RU,IN]"
         )
         offers = json.loads(vast(["search", "offers", query, "-o", "dph+", "--raw"], key) or "[]")
-        offers = [o for o in offers if o.get("dph_total", 99) <= max_dph]
-        if offers and (best is None or offers[0]["dph_total"] < best["dph_total"]):
-            best = offers[0]
-    return best
+        candidates += [o for o in offers if hourly_cost(o, disk) <= max_dph]
+    return min(candidates, key=lambda o: hourly_cost(o, disk), default=None)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--budget", type=float, default=5.0, help="USD ceiling for the whole suite")
-    ap.add_argument("--disk", type=int, default=80)
+    ap.add_argument("--disk", type=int, default=60)
     ap.add_argument("--max-dph", type=float, default=0.45)
     ap.add_argument("--epochs", type=int, default=8)
     ap.add_argument("--suite", default="raw200-resnext:42 raw200-simple:42 raw200-pyramid:42 raw200-resnext:43")
