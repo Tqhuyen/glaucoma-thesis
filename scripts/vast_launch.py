@@ -11,6 +11,7 @@ wall-clock cap derived from --budget is reached.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -123,7 +124,7 @@ def main():
         ],
         key,
     )
-    print(out.strip() or "(empty response)")
+    print(re.sub(r'("instance_api_key":\s*")[^"]+', r"\1***", out.strip()) or "(empty response)")
     if "success" not in out.lower():
         raise SystemExit("create instance did not confirm success; check the vast.ai console before retrying")
     print("launched; follow progress in W&B project glaucoma-thesis (runs raw200-*-s42 / -s43)")
