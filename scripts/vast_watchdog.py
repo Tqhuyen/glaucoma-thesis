@@ -34,9 +34,9 @@ from pipeline.utils import SecureStr, load_env_file, redact, secret_env  # noqa:
 DEST = ROOT / "artifacts" / "vast"
 REMOTE_PROBE = r"""
 cd /workspace 2>/dev/null || exit 3
-train=$(pgrep -f "pipeline[.]train|nbconvert" | head -1)
+train=$(pgrep -f "pipeline[.]train|[n]bconvert|hsi[_]mphsir|train[.]py --arm|evaluate[.]py --data" | head -1)
 suite=$(pgrep -f "suite[0-9]?[.]sh" | head -1)
-newest=$(find training_runs dl_lab_run post_task -type f -printf "%T@\n" 2>/dev/null | sort -n | tail -1)
+newest=$(find training_runs dl_lab_run post_task hsi_run -type f -printf "%T@\n" 2>/dev/null | sort -n | tail -1)
 echo "train=${train:-none} suite=${suite:-none} newest=${newest:-0} now=$(date +%s)"
 """
 
@@ -92,7 +92,7 @@ def sync(key_file, info):
         key_file,
         info,
         'cd /workspace && tar czf - --exclude="*/checkpoints" --exclude="*/tb" $(ls -d training_runs suite.log '
-        "dl_lab_run/outputs dl_lab_run/executed.ipynb post_task/outputs post_task/executed.ipynb 2>/dev/null) "
+        "dl_lab_run/outputs dl_lab_run/executed.ipynb post_task/outputs post_task/executed.ipynb hsi_run/outputs 2>/dev/null) "
         "2>/dev/null",
         binary=True,
     )

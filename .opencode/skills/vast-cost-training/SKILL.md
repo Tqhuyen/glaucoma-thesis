@@ -159,6 +159,7 @@ Then restart the local watchdog.
 | ssh shell lacks HF_TOKEN etc. | read `/proc/<controller pid>/environ` into a 600 file |
 | `syntax error near $'in\r'` | CRLF in `.sh`; `.gitattributes` has `*.sh text eol=lf` |
 | `pgrep -f pattern` always matches | the probe's own cmdline contains it; use `pipeline[.]train` |
+| `pkill -f X` / `pgrep -f X` over ssh matches the ssh command's own shell (killed our session mid-swap; made the watchdog see a phantom trainer) | kill by explicit PID; in patterns bracket one char: `[n]bconvert`, `hsi[_]mphsir` |
 | W&B 403 on some hosts (even `wandb.ai` homepage: IP-level block, no user whitelist on SaaS) | outputs go to HF; `python scripts/wandb_replay.py artifacts/vast/training_runs --follow` streams synced metrics to W&B from the local machine (~10 min lag) |
 | `train.lr=1e-4` rejected as str | YAML override: write `0.0001` |
 | outputs under `.../<run>/<run>` | `pipeline.train` already appends `run_name` to `output_dir` |
