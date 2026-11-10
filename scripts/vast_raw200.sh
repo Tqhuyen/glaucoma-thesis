@@ -19,12 +19,13 @@ OUT="${OUT:-/workspace/training_runs}"
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 case "$RUN" in
-  raw200-resnext) ARCH="${ARCH:-pyramid_resnext3d}" ;;
-  raw200-pyramid) ARCH="${ARCH:-pyramid3dcnn}" ;;
-  raw200-thinhead) ARCH="${ARCH:-pyramid3dcnn}" ;;
-  raw200-simple) ARCH="${ARCH:-simple3dcnn}" ;;
+  raw200-resnext*) ARCH="${ARCH:-pyramid_resnext3d}" ;;
+  raw200-pyramid*) ARCH="${ARCH:-pyramid3dcnn}" ;;
+  raw200-thinhead*) ARCH="${ARCH:-pyramid3dcnn}" ;;
+  raw200-simple*) ARCH="${ARCH:-simple3dcnn}" ;;
   *) ARCH="${ARCH:-pyramid_resnext3d}" ;;
 esac
+SEED="${SEED:-42}"
 
 : "${HF_TOKEN:?export HF_TOKEN first}"
 : "${WANDB_API_KEY:?export WANDB_API_KEY first}"
@@ -56,12 +57,12 @@ PY
 fi
 
 HP=gap
-if [ "$RUN" = "raw200-thinhead" ]; then HP=depth_attention; fi
+case "$RUN" in raw200-thinhead*) HP=depth_attention ;; esac
 if [ "$ARCH" = "pyramid_resnext3d" ]; then FDIM=128; else FDIM=64; fi
 
 mkdir -p "$OUT"
 python -m pipeline.train --cfg configs/glaucoma.yaml --set \
-  run_name="$RUN" model.architecture="$ARCH" data.data_dir="$DATA" \
+  run_name="$RUN" seed="$SEED" model.architecture="$ARCH" data.data_dir="$DATA" \
   model.fusion_dim="$FDIM" model.head_pool="$HP" \
   logging.wandb=true logging.tensorboard=true output_dir="$OUT" \
   train.lr=0.0001 train.epochs="$EPOCHS" train.batch_size="$BS" \
