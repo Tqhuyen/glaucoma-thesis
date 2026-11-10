@@ -64,7 +64,7 @@ mkdir -p "$OUT"
 python -m pipeline.train --cfg configs/glaucoma.yaml --set \
   run_name="$RUN" seed="$SEED" model.architecture="$ARCH" data.data_dir="$DATA" \
   model.fusion_dim="$FDIM" model.head_pool="$HP" \
-  logging.wandb=true logging.tensorboard=true output_dir="$OUT" \
+  logging.wandb="${WANDB_ENABLED:-true}" logging.tensorboard=true output_dir="$OUT" \
   train.lr=0.0001 train.epochs="$EPOCHS" train.batch_size="$BS" \
   train.grad_accum_steps="$ACCUM" train.eval_every_steps=100 \
   train.eval_test_every_steps=300 train.save_every_steps=300 \
