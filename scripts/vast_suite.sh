@@ -132,7 +132,7 @@ api = HfApi(token=os.environ["HF_TOKEN"])
 repo, out = os.environ["RESULTS_REPO"], os.environ["POST_OUT"]
 api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
 api.upload_folder(repo_id=repo, repo_type="model", folder_path=out, path_in_repo=f"post/{os.environ['POST_NAME']}",
-                  allow_patterns=["outputs/**", "*.ipynb", "*.log", "*.csv", "*.json", "*.txt", "*.png"],
+                  allow_patterns=["outputs/**", "task.ipynb", "executed.ipynb"],
                   commit_message=f"{os.environ['POST_NAME']} outputs, notebooks, logs")
 print(f"[suite] uploaded post task -> hf://{repo}/post/{os.environ['POST_NAME']}", flush=True)
 PY
