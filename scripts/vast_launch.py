@@ -24,14 +24,25 @@ SUITE_URL = "https://raw.githubusercontent.com/Tqhuyen/glaucoma-thesis/master/sc
 GPUS = ("RTX_3090", "RTX_4090")
 
 
+def _session_key():
+    try:
+        from vastai.cli.util import TFAKEY_FILE
+    except ImportError:
+        return None
+    path = Path(TFAKEY_FILE)
+    return path.read_text().strip() if path.exists() else None
+
+
 def vast(args, key):
     exe = shutil.which("vastai")
     if exe is None:
         raise SystemExit("vastai CLI not found: pip install vastai")
-    out = subprocess.run([exe, "--api-key", key, *args], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise SystemExit(f"vastai {' '.join(args[:2])} failed: {out.stderr.strip() or out.stdout.strip()}")
-    return out.stdout
+    use = key if args[0] == "search" else (_session_key() or key)
+    out = subprocess.run([exe, "--api-key", use, *args], capture_output=True, text=True)
+    text = (out.stdout + out.stderr).replace(use, "***").replace(key, "***")
+    if out.returncode != 0 or '"error": true' in text or "Failed with error" in text:
+        raise SystemExit(f"vastai {' '.join(args[:2])} failed: {text.strip()[:400]}")
+    return out.stdout if args[0] == "search" else text
 
 
 def hourly_cost(offer, disk):
@@ -112,7 +123,9 @@ def main():
         ],
         key,
     )
-    print(out)
+    print(out.strip() or "(empty response)")
+    if "success" not in out.lower():
+        raise SystemExit("create instance did not confirm success; check the vast.ai console before retrying")
     print("launched; follow progress in W&B project glaucoma-thesis (runs raw200-*-s42 / -s43)")
 
 

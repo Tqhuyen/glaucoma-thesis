@@ -29,8 +29,14 @@ run.finish()
 PY
   if [ -n "${CONTAINER_ID:-}" ] && [ -n "${CONTAINER_API_KEY:-}" ]; then
     pip install -q vastai
-    vastai destroy instance "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY"
+    if vastai destroy instance "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY" 2>&1 | tee -a "$LOG" | grep -qiE "error|failed"; then
+      echo "[suite] destroy refused; stopping instance instead"
+      vastai stop instance "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY" 2>&1 | tee -a "$LOG" || true
+    fi
   fi
+  echo "[suite] stopping container so GPU billing ends even if the API calls failed"
+  sync
+  kill -TERM 1 2>/dev/null || true
 }
 trap finish EXIT
 
