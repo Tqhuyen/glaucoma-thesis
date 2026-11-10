@@ -101,7 +101,8 @@ Within the first 10 minutes **verify**, do not assume:
 - Runs `POST_TASK` with the remaining cap and uploads `outputs/**`, `task.ipynb`,
   `executed.ipynb` to `RESULTS_REPO/post/<POST_NAME>` (never re-uploads public weights/datasets).
 - `trap EXIT`: final sync of all runs + `logs/suite.log`, `logs/launch*.out`, then
-  `vastai destroy` with the instance-scoped `CONTAINER_API_KEY` (verified to work under 2FA);
+  `vastai destroy` with the instance-scoped `CONTAINER_API_KEY` (verified: it can read its own
+  instance under 2FA; confirm the destroy path on the first finished run);
   if refused -> `stop`; finally `kill -TERM 1` so GPU billing ends even if every API call fails.
 
 ## Local watchdog rules (`vast_watchdog.py`)
