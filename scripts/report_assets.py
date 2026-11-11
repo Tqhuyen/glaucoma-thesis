@@ -197,7 +197,8 @@ def main():
     parser.add_argument("--skip-hsi", action="store_true")
     args = parser.parse_args()
     device = torch.device("cuda")
-    glaucoma(args, device)
+    if not (args.out / "glaucoma" / "cases.json").exists():
+        glaucoma(args, device)
     if not args.skip_hsi:
         hsi(args, device)
 
