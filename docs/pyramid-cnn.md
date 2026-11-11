@@ -191,6 +191,29 @@ Test đạt 70,9% ở step 600, 73,8% ở step 1200 rồi dao động 72–74% �
 nên "best val" ở step 1700 là chọn theo nhiễu; test 900 mẫu có CI95 ≈ ±2,9 điểm — chênh lệch
 2,0–2,7 điểm so với baseline matched vẫn nằm trong ~1,3 SE của hiệu.
 
+## 5b. Kết quả raw 200³ (vast.ai RTX 3090) và so sánh từng ca
+
+Recipe như mục 5 nhưng batch 1 × accum 8, không bilateral. Số dưới đây tính lại từ xác suất từng
+mẫu trên 900 ảnh test (`hf://tqhuyen/glaucoma-raw200-runs/post/report-assets/glaucoma/`).
+
+| Model | Dữ liệu | Epoch | Acc | AUC | MCC |
+|---|---|---:|---:|---:|---:|
+| Simple3DCNN | raw 200³ | 8 | 67,11% | 0,720 | 0,333 |
+| Pyramid3DCNN | raw 200³ | 8 | 72,44% | 0,787 | 0,450 |
+| **Pyramid3DCNN** | raw 200³ | 15 (dừng sớm 12,6) | **74,44%** | 0,815 | 0,484 |
+| PyramidResNeXt3D | raw 200³ | 8, seed 42 / 43 | 64,44% / 64,89% | 0,710 / 0,706 | 0,277 / 0,298 |
+| PyramidResNeXt3D | bilateral 96³ | 15 | 74,78% | **0,827** | **0,517** |
+
+- Trên raw 200³ chỉ Pyramid3DCNN theo kịp các model bilateral 96³; Simple và ResNeXt raw tạo
+  thành một cụm hành vi riêng, kém hơn (tương quan xác suất với cụm tốt 0,59–0,71).
+- Các model tốt (Pyramid raw, cả 3 model bil96) hội tụ về gần cùng một hàm quyết định
+  (r = 0,90–0,97) dù khác dữ liệu đầu vào, nên ensemble gần như không tăng.
+- Chưa model nào vượt SOTA `single3d-resxt3d` (77,11%, AUC 0,854); recipe vẫn khác (lr, batch,
+  tiêu chí chọn checkpoint).
+
+Báo cáo đầy đủ có hình ca bệnh và saliency: `hf://tqhuyen/glaucoma-raw200-runs/reports/experiments_report.html`
+(dựng lại bằng `python scripts/build_report.py`).
+
 ## 6. Kế hoạch đọc kết quả
 
 1. So với `simple3dcnn` **cùng 96³, cùng batch/lr/epoch, seed 42** (đã đẩy kernel
