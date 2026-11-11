@@ -101,8 +101,9 @@ Within the first 10 minutes **verify**, do not assume:
 - Runs `POST_TASK` with the remaining cap and uploads `outputs/**`, `task.ipynb`,
   `executed.ipynb` to `RESULTS_REPO/post/<POST_NAME>` (never re-uploads public weights/datasets).
 - `trap EXIT`: final sync of all runs + `logs/suite.log`, `logs/launch*.out`, then
-  `vastai destroy` with the instance-scoped `CONTAINER_API_KEY` (verified: it can read its own
-  instance under 2FA; confirm the destroy path on the first finished run);
+  `vastai destroy instance -y` with the instance-scoped `CONTAINER_API_KEY` (it can read its own
+  instance under 2FA). **`-y` is mandatory**: current `vastai` asks `[y/N]`, and without a TTY it prints
+  `Aborted.` and keeps billing (happened on 2026-11-11: controller and watchdog both aborted);
   if refused -> `stop`; finally `kill -TERM 1` so GPU billing ends even if every API call fails.
 
 ## Local watchdog rules (`vast_watchdog.py`)
@@ -160,6 +161,7 @@ Then restart the local watchdog.
 | `syntax error near $'in\r'` | CRLF in `.sh`; `.gitattributes` has `*.sh text eol=lf` |
 | `pgrep -f pattern` always matches | the probe's own cmdline contains it; use `pipeline[.]train` |
 | `pkill -f X` / `pgrep -f X` over ssh matches the ssh command's own shell (killed our session mid-swap; made the watchdog see a phantom trainer) | kill by explicit PID; in patterns bracket one char: `[n]bconvert`, `hsi[_]mphsir` |
+| `vastai destroy` prints `Aborted.` and the box keeps billing | always `destroy instance -y`; treat `aborted` as failure; `kill -TERM 1` does not stop a vast container |
 | W&B 403 on some hosts (even `wandb.ai` homepage: IP-level block, no user whitelist on SaaS) | outputs go to HF; `python scripts/wandb_replay.py artifacts/vast/training_runs --follow` streams synced metrics to W&B from the local machine (~10 min lag) |
 | `train.lr=1e-4` rejected as str | YAML override: write `0.0001` |
 | outputs under `.../<run>/<run>` | `pipeline.train` already appends `run_name` to `output_dir` |

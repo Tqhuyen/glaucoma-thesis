@@ -111,7 +111,11 @@ def sync(key_file, info):
 def destroy(key, inst_id, reason):
     log(f"DESTROY {inst_id}: {reason}")
     try:
-        log(redact(v.vast(["destroy", "instance", str(inst_id)], key)).strip()[:200])
+        out = redact(v.vast(["destroy", "instance", "-y", str(inst_id)], key)).strip()
+        log(out[:200])
+        if "abort" in out.lower():
+            log(f"destroy aborted -> run `vastai destroy instance -y {inst_id}`")
+            return False
         return True
     except SystemExit as e:
         log(f"destroy failed: {e} -> run `vastai tfa login` then `vastai destroy instance {inst_id}`")

@@ -63,7 +63,8 @@ finish() {
   upload_all
   if [ -n "${CONTAINER_ID:-}" ] && [ -n "${CONTAINER_API_KEY:-}" ]; then
     pip install -q vastai
-    if vastai destroy instance "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY" 2>&1 | tee -a "$LOG" | grep -qiE "error|failed"; then
+    if vastai destroy instance -y "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY" 2>&1 | tee -a "$LOG" \
+      | grep -qiE "error|failed|aborted"; then
       echo "[suite] destroy refused; stopping instance instead"
       vastai stop instance "$CONTAINER_ID" --api-key "$CONTAINER_API_KEY" 2>&1 | tee -a "$LOG" || true
     fi
