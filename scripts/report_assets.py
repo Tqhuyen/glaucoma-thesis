@@ -57,7 +57,12 @@ def glaucoma(args, device):
     volumes = np.load(args.data / "Test_volumes.npy", mmap_mode="r")
     labels = np.load(args.data / "Test_labels.npy").astype(int)
     probs = {}
+    cached = out / "test_probs.npz"
+    if cached.exists():
+        probs = {k: v for k, v in np.load(cached).items() if k != "labels"}
     for run in RUNS:
+        if run in probs:
+            continue
         run_dir = args.runs / run
         if not (run_dir / "best_model.pt").exists():
             continue
@@ -98,14 +103,14 @@ def glaucoma(args, device):
     saliency_nets = {r: load_model(args.runs / r, device) for r in (best, base) if r in probs}
     cases = []
     for i, why in picks.items():
-        vol = np.asarray(volumes[i], dtype=np.float32)
+        vol = np.asarray(volumes[i], dtype=np.float32).reshape(volumes.shape[-3:])
         to_png(vol[vol.shape[0] // 2], out / f"case{i}_bscan.png")
         to_png(vol.mean(1), out / f"case{i}_enface.png")
         entry = {"index": i, "label": int(labels[i]), "why": why, "probs": {r: float(probs[r][i]) for r in probs}}
         for r, net in saliency_nets.items():
-            x = torch.from_numpy(vol / 255.0).unsqueeze(0).to(device).requires_grad_(True)
+            x = torch.from_numpy(vol / 255.0).view(1, *volumes.shape[1:]).to(device).requires_grad_(True)
             logits_of(net, x)[0, 1].backward()
-            heat_png(x.grad.abs()[0].mean(1).cpu().numpy(), out / f"case{i}_saliency_{r}.png")
+            heat_png(x.grad.abs().reshape(vol.shape).mean(1).cpu().numpy(), out / f"case{i}_saliency_{r}.png")
         cases.append(entry)
     (out / "cases.json").write_text(json.dumps(cases, indent=1))
 
