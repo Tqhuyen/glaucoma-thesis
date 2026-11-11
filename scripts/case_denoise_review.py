@@ -46,42 +46,69 @@ def to_png(im, path, low, high):
     Image.fromarray((a * 255).astype(np.uint8)).save(path)
 
 
+def score_case(index, vol, methods, workers, out):
+    """Denoise one volume with ``methods`` and return its survey metrics; writes middle B-scan crops."""
+    from skimage.filters import threshold_otsu
+
+    dz = depth_axis(vol)
+    thr = float(threshold_otsu(vol))
+    mid = vol.shape[0] // 2
+    low, high = np.percentile(vol[mid], [1, 99])
+    to_png(vol[mid], out / f"case{index}_original.png", low, high)
+    entry = {"index": index, "depth_axis": dz, "threshold": thr, "methods": {}}
+    entry["methods"]["original"] = _slice_and_global(vol, vol, dz, thr)["global"]
+    for name in methods:
+        den, seconds = denoise_volume(vol, name, workers=workers)
+        scores = {**_slice_and_global(vol, den, dz, thr)["global"], "seconds": round(seconds, 1)}
+        if name == "bm3d":
+            scores["sigma_psd"] = METHODS["bm3d"]["params"]["sigma_psd"]
+        entry["methods"][name] = scores
+        to_png(den[mid], out / f"case{index}_{name}.png", low, high)
+    print(f"[case {index}] cnr_bg { ({m: round(v['cnr_bg'], 3) for m, v in entry['methods'].items()}) }", flush=True)
+    return entry
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=Path("artifacts/case_denoise"))
-    parser.add_argument("--workers", type=int, default=os.cpu_count() or 8)
+    parser.add_argument("--methods", default=",".join(CLASSICAL), help="comma list")
+    parser.add_argument("--workers", type=int, default=os.cpu_count() or 8, help="threads per volume (non-bm3d)")
+    parser.add_argument("--procs", type=int, default=2, help="volumes in parallel when bm3d is requested")
     args = parser.parse_args()
 
-    from skimage.filters import threshold_otsu
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     from pipeline.utils import load_env_file, secret_env
 
     load_env_file()
+    methods = [m for m in args.methods.split(",") if m]
     cases = json.loads(args.cases.read_text())
+    order = [c["index"] for c in cases]
     args.out.mkdir(parents=True, exist_ok=True)
-    volumes = fetch_volumes([c["index"] for c in cases], secret_env("HF_TOKEN").reveal())
-    results = []
-    for c in cases:
-        i = c["index"]
-        vol = volumes[i]
-        dz = depth_axis(vol)
-        thr = float(threshold_otsu(vol))
-        mid = vol.shape[0] // 2
-        low, high = np.percentile(vol[mid], [1, 99])
-        to_png(vol[mid], args.out / f"case{i}_original.png", low, high)
-        entry = {"index": i, "depth_axis": dz, "threshold": thr, "methods": {}}
-        entry["methods"]["original"] = _slice_and_global(vol, vol, dz, thr)["global"]
-        for name in CLASSICAL:
-            den, seconds = denoise_volume(vol, name, workers=args.workers)
-            entry["methods"][name] = {**_slice_and_global(vol, den, dz, thr)["global"], "seconds": round(seconds, 1)}
-            to_png(den[mid], args.out / f"case{i}_{name}.png", low, high)
-        results.append(entry)
-        best = {m: round(v["cnr_bg"], 3) for m, v in entry["methods"].items()}
-        print(f"[case {i}] cnr_bg {best}", flush=True)
-    (args.out / "metrics.json").write_text(
-        json.dumps({"params": {m: METHODS[m]["params"] for m in CLASSICAL}, "cases": results}, indent=1)
-    )
+    path = args.out / "metrics.json"
+
+    def merge(entry):
+        merged = json.loads(path.read_text()) if path.exists() else {"params": {}, "cases": []}
+        by_index = {c["index"]: c for c in merged["cases"]}
+        slot = by_index.setdefault(entry["index"], {"index": entry["index"], "methods": {}})
+        slot.update({k: v for k, v in entry.items() if k != "methods"})
+        slot["methods"].update(entry["methods"])
+        merged["params"].update({m: METHODS[m]["params"] for m in methods if m != "bm3d"})
+        if "bm3d" in methods:
+            merged["params"]["bm3d"] = {"profile": "np", "sigma_psd": "estimate_sigma per volume (see per-case value)"}
+        merged["cases"] = [by_index[i] for i in order if i in by_index]
+        path.write_text(json.dumps(merged, indent=1))
+
+    volumes = fetch_volumes(order, secret_env("HF_TOKEN").reveal())
+    if "bm3d" in methods:
+        with ProcessPoolExecutor(max_workers=max(1, args.procs)) as pool:
+            futures = [pool.submit(score_case, i, volumes[i], methods, 1, args.out) for i in order]
+            for future in as_completed(futures):
+                merge(future.result())
+    else:
+        for i in order:
+            merge(score_case(i, volumes[i], methods, args.workers, args.out))
 
 
 if __name__ == "__main__":

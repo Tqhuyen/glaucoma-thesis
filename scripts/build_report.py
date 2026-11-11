@@ -490,7 +490,7 @@ def glaucoma_section(rng):
 
 
 DENOISE = ART / "case_denoise"
-DN_METHODS = ["original", "bilateral", "wavelet", "tv", "nlm", "gaussian", "median"]
+DN_METHODS = ["original", "bilateral", "wavelet", "bm3d", "tv", "nlm", "gaussian", "median"]
 
 
 def denoise_cases_section():
@@ -513,10 +513,12 @@ def denoise_cases_section():
                 "CNR_bg gốc": m["original"]["cnr_bg"],
                 "CNR_bg Bilateral": m["bilateral"]["cnr_bg"],
                 "CNR_bg Wavelet": m["wavelet"]["cnr_bg"],
+                "CNR_bg BM3D": m["bm3d"]["cnr_bg"],
                 "CNR_bg TV": m["tv"]["cnr_bg"],
                 "CNR_bg NLM": m["nlm"]["cnr_bg"],
                 "β Bilateral": m["bilateral"]["beta"],
                 "β Wavelet": m["wavelet"]["beta"],
+                "β BM3D": m["bm3d"]["beta"],
                 "σ nền gốc → Bilateral": f"{m['original']['bg_sigma']:.1f} → {m['bilateral']['bg_sigma']:.1f}",
                 "CNR_bg cao nhất": best,
                 "Model raw (Pyramid) đúng": f"{raw_ok}/2",
@@ -843,15 +845,16 @@ CNR_bg = (μ<sub>tín hiệu</sub>−μ<sub>nền</sub>)/σ<sub>nền</sub> (tư
 Khối OCT lấy trực tiếp từ <code>tqhuyen/harvard-oct-glaucoma-200</code>. Script: <code>scripts/case_denoise_review.py</code>.</div>
 {dn_table}
 <h3>Kết luận cho 10 ca</h3><ul>
-<li><b>Chỉ Bilateral và Wavelet cải thiện ảnh</b>: CNR_bg tăng ở cả 10/10 ca (Bilateral +6,6% đến +19,6%, Wavelet +7,8% đến +14,6%).
+<li><b>Chỉ BM3D, Bilateral và Wavelet cải thiện ảnh</b>: CNR_bg tăng ở cả 10/10 ca (BM3D +29% đến +57%, Bilateral +6,6% đến +19,6%, Wavelet +7,8% đến +14,6%).
 TV, Gaussian, Median <b>giảm</b> CNR_bg dưới ảnh gốc ở cả 10 ca; NLM giảm ở 9/10 ca (ngoại lệ #813, chỉ +0,04). β của 4 bộ lọc này chỉ 0,44–0,64 — ảnh mờ ranh giới lớp võng mạc (xem hình). <b>Không dùng 4 bộ lọc này</b> cho các ca này.</li>
-<li><b>Bilateral</b> thắng CNR_bg ở cả 4 ca glaucoma và giảm σ nền mạnh nhất (−27,5% so với −17,0% của Wavelet), nhưng làm phẳng kết cấu bên trong lớp mô.
+<li><b>BM3D</b> (profile <code>np</code>, σ<sub>psd</sub> ước lượng 0,040–0,043 mỗi khối) <b>mạnh nhất theo chỉ số ảnh</b>: CNR_bg cao nhất ở 10/10 ca (+27% so với Bilateral), giảm σ nền 37%, β ngang Bilateral (0,82–0,90, trung bình 0,846 so với 0,852). Trên ảnh: nền sạch và kết cấu lớp mô giữ tốt hơn Bilateral, nhưng <b>sinh vệt/khối nhân tạo có cấu trúc</b> ở vùng tối (vệt dọc #371, vệt ngang #774, mảng khối #562) — CNN có thể học nhầm các vệt này thành đặc trưng. Chi phí: ~45 phút/khối trên 1 lõi CPU (≈ 2.450 giờ-lõi cho 3.300 khối Harvard-GF); bản CUDA (<code>docs/bm3d-cuda-local.md</code>) ~0,2 s/khối.</li>
+<li><b>Bilateral</b> đứng sau BM3D về CNR_bg ở mọi ca nhưng rẻ hơn ~7 lần tính theo giờ-lõi CPU (46 s/khối trên 8 luồng so với ~2.680 s/khối trên 1 lõi); giảm σ nền 27,5% (Wavelet 17,0%) và làm phẳng kết cấu bên trong lớp mô.
 <b>Wavelet</b> thắng CNR_bg ở 5/6 ca bình thường và giữ biên tốt nhất (β 0,84–0,92, so với 0,83–0,88 của Bilateral), đổi lại còn nhiều speckle.</li>
 <li><b>Bằng chứng phân loại</b> (chỉ có cho Bilateral, vì chưa train model trên Wavelet): trên toàn tập test, pipeline Bilateral tăng specificity
 ({pct(dn["spec_raw"])} → {pct(dn["spec_bil"])}, Pyramid raw 15 ep → Pyramid bil96) nhưng giảm sensitivity ({pct(dn["sens_raw"])} → {pct(dn["sens_bil"])}).
 Đúng như vậy trên các ca: ca bình thường #813 chỉ model Bilateral nhận đúng; hai ca glaucoma khó #371 và #774 thì cả 3 model Bilateral bỏ sót.
 Hai pipeline sai ở những ca khác nhau: {dn["raw_only"]} ca raw đúng mà Bilateral sai, {dn["bil_only"]} ca ngược lại.</li></ul>
-<div class="good"><b>Khuyến nghị:</b> (1) <b>Bilateral</b> là lựa chọn chính hiện có bằng chứng (CNR_bg và giảm nhiễu nền tốt nhất; model bil96 có AUC cao nhất 0,827) — hợp khi ưu tiên giảm dương tính giả.
+<div class="good"><b>Khuyến nghị:</b> (1) <b>Bilateral</b> vẫn là lựa chọn chính vì là bộ lọc duy nhất đã có bằng chứng phân loại (model bil96 AUC cao nhất 0,827) — hợp khi ưu tiên giảm dương tính giả. (1b) <b>BM3D</b> là ứng viên mạnh nhất theo chỉ số ảnh và đáng một thí nghiệm phân loại có kiểm soát — chạy bằng BM3D CUDA để chi phí khả thi, và kiểm tra artifact vệt trước khi train.
 (2) Với mục tiêu <b>không bỏ sót glaucoma sớm</b> (RNFL mỏng như #371, #774), nên giữ thêm nhánh <b>raw</b> hoặc thử <b>Wavelet</b> (giữ biên tốt nhất, can thiệp nhẹ) — đây là giả thuyết, cần thí nghiệm phân loại có kiểm soát với Wavelet trước khi kết luận.
 (3) Loại TV, NLM, Gaussian, Median.</div>
 <div class="note">Giới hạn: 10 ca không phải mẫu đại diện (chọn theo hành vi model); CNR_bg/β là chỉ số gián tiếp, mask Otsu không phải phân đoạn RNFL; ảnh hiển thị là vùng crop B-scan giữa khối, cùng thang xám với ảnh gốc.</div>
