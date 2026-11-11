@@ -489,6 +489,67 @@ def glaucoma_section(rng):
     return main_table, agg_table, mc_table, figs, "".join(cards), stats
 
 
+DENOISE = ART / "case_denoise"
+DN_METHODS = ["original", "bilateral", "wavelet", "tv", "nlm", "gaussian", "median"]
+
+
+def denoise_cases_section():
+    mj = json.loads((DENOISE / "metrics.json").read_text())
+    y, probs = load_probs()
+    raw_strong = ["raw200-pyramid-s42", "raw200-pyramid-e15-s42"]
+    bil = ["simple3dcnn-bilateral96-s42", "pyramid-bilateral96-s42", "pyramid-resnext-bilateral96-s42"]
+    rows, cards = [], []
+    for c in mj["cases"]:
+        i, m = c["index"], c["methods"]
+        lab = int(y[i])
+        cand = {k: v for k, v in m.items() if k != "original"}
+        best = max(cand, key=lambda k: cand[k]["cnr_bg"])
+        raw_ok = sum((probs[k][i] > 0.5) == lab for k in raw_strong)
+        bil_ok = sum((probs[k][i] > 0.5) == lab for k in bil)
+        rows.append(
+            {
+                "Ca": f"#{i}",
+                "Nhãn": "glaucoma" if lab else "bình thường",
+                "CNR_bg gốc": m["original"]["cnr_bg"],
+                "CNR_bg Bilateral": m["bilateral"]["cnr_bg"],
+                "CNR_bg Wavelet": m["wavelet"]["cnr_bg"],
+                "CNR_bg TV": m["tv"]["cnr_bg"],
+                "CNR_bg NLM": m["nlm"]["cnr_bg"],
+                "β Bilateral": m["bilateral"]["beta"],
+                "β Wavelet": m["wavelet"]["beta"],
+                "σ nền gốc → Bilateral": f"{m['original']['bg_sigma']:.1f} → {m['bilateral']['bg_sigma']:.1f}",
+                "CNR_bg cao nhất": best,
+                "Model raw (Pyramid) đúng": f"{raw_ok}/2",
+                "Model bilateral 96³ đúng": f"{bil_ok}/3",
+            }
+        )
+        cells = "".join(
+            f"<figure>{img_tag(DENOISE / f'case{i}_{k}.png', '150px', True)}<figcaption>{k}"
+            + (f" · CNR_bg {m[k]['cnr_bg']:.2f} · β {m[k]['beta']:.2f}" if k != "original" else "")
+            + "</figcaption></figure>"
+            for k in DN_METHODS
+        )
+        cards.append(
+            f'<div class="case"><h4>Ca #{i} — {"glaucoma" if lab else "bình thường"} · raw đúng {raw_ok}/2 · '
+            f'bilateral đúng {bil_ok}/3</h4><div class="row">{cells}</div></div>'
+        )
+    df = pd.DataFrame(rows)
+    fmt = {c: f3 for c in df.columns if c.startswith(("CNR_bg ", "β "))}
+    fmt["CNR_bg cao nhất"] = str
+    tab = table(df, fmt)
+    r = (probs["raw200-pyramid-e15-s42"] > 0.5) == y
+    b = (probs["pyramid-bilateral96-s42"] > 0.5) == y
+    stats = {
+        "raw_only": int((r & ~b).sum()),
+        "bil_only": int((~r & b).sum()),
+        "spec_raw": r[y == 0].mean(),
+        "spec_bil": b[y == 0].mean(),
+        "sens_raw": r[y == 1].mean(),
+        "sens_bil": b[y == 1].mean(),
+    }
+    return tab, "".join(cards), stats, mj["params"]
+
+
 HSI_COND_VI = {
     "gauss30": "Gaussian σ30",
     "gauss50": "Gaussian σ50",
@@ -706,6 +767,7 @@ def build(out):
     main_table, agg_table, mc_table, gfig, cases_html, gs = glaucoma_section(rng)
     cond_table, set_table, gate_table, real_table, fig_cond, fig_loss, gallery, real_gal, cond, cond_ex = hsi_section()
     usumm, ufig, ugain = urban_section()
+    dn_table, dn_cards, dn, dn_params = denoise_cases_section()
     m = gs["m"]
     best = gs["best"]
     e15, p8, simple = m["raw200-pyramid-e15-s42"], m["raw200-pyramid-s42"], m["raw200-simple-s42"]
@@ -719,7 +781,7 @@ def build(out):
 <header><h1>Báo cáo thí nghiệm: Glaucoma 3D CNN · MP-HSIR khử nhiễu ảnh siêu phổ · Urban100</h1>
 <p>Đợt chạy 07–11/11/2026 · Kaggle (T4), Modal, vast.ai (RTX 3090) · Toàn bộ model, checkpoint, log lưu trên Hugging Face (private)</p>
 <p>Tập test glaucoma: Harvard-GF, 900 khối OCT (489 glaucoma / 411 bình thường), cùng thứ tự mẫu cho mọi model</p></header>
-<nav><a href="#tomtat">Tóm tắt</a><a href="#glaucoma">Glaucoma</a><a href="#khacbiet">Model khác nhau ở đâu</a><a href="#ca">Ca minh hoạ</a>
+<nav><a href="#tomtat">Tóm tắt</a><a href="#glaucoma">Glaucoma</a><a href="#khacbiet">Model khác nhau ở đâu</a><a href="#ca">Ca minh hoạ</a><a href="#khunhieu">Khử nhiễu cho các ca</a>
 <a href="#hsi">MP-HSIR</a><a href="#urban">Urban100</a><a href="#hatang">Chi phí & hạ tầng</a><a href="#gioihan">Giới hạn</a><a href="#phuluc">Phụ lục</a></nav>
 <main>
 <section id="tomtat"><h2>1. Tóm tắt kết quả</h2>
@@ -772,6 +834,28 @@ Ensemble trung bình 8 model đạt {pct(ens["acc"])} / AUC {ens["auc"]:.3f} —
 <section id="ca"><h2>4. Ca minh hoạ: ảnh đầu vào, saliency và dự đoán của từng model</h2>
 <p>Saliency = |∂ logit glaucoma / ∂ input| lấy trung bình theo độ sâu (vùng sáng = voxel ảnh hưởng nhiều nhất), thang màu chuẩn hoá riêng từng ảnh. Ô xanh/đỏ = model đúng/sai ở ngưỡng 0,5. Các ca được chọn ngẫu nhiên (seed 0) trong từng nhóm, nhóm xác định theo <b>5 model raw 200³</b>; bảng xác suất hiện thêm 3 model bil96 để đối chiếu.</p>
 {cases_html}</section>
+
+<section id="khunhieu"><h2>4b. Nên dùng kiểu khử nhiễu nào cho các ca minh hoạ?</h2>
+<div class="note">Cùng quy trình khảo sát khử nhiễu của luận văn (<code>docs/denoise-top3-thesis-review.md</code>): 6 bộ lọc 2D theo từng B-scan,
+tham số giữ nguyên (Bilateral σ<sub>color</sub>={dn_params["bilateral"]["sigma_color"]}, σ<sub>spatial</sub>={dn_params["bilateral"]["sigma_spatial"]};
+Wavelet db4 BayesShrink soft; TV λ={dn_params["tv"]["weight"]}; NLM h={dn_params["nlm"]["h"]}), chỉ số không tham chiếu tính trên toàn khối:
+CNR_bg = (μ<sub>tín hiệu</sub>−μ<sub>nền</sub>)/σ<sub>nền</sub> (tương phản mô/nền), σ nền (mức speckle nền), β = tương quan gradient với ảnh gốc ở 15% vị trí biên mạnh nhất (mức giữ biên).
+Khối OCT lấy trực tiếp từ <code>tqhuyen/harvard-oct-glaucoma-200</code>. Script: <code>scripts/case_denoise_review.py</code>.</div>
+{dn_table}
+<h3>Kết luận cho 10 ca</h3><ul>
+<li><b>Chỉ Bilateral và Wavelet cải thiện ảnh</b>: CNR_bg tăng ở cả 10/10 ca (Bilateral +6,6% đến +19,6%, Wavelet +7,8% đến +14,6%).
+TV, Gaussian, Median <b>giảm</b> CNR_bg dưới ảnh gốc ở cả 10 ca; NLM giảm ở 9/10 ca (ngoại lệ #813, chỉ +0,04). β của 4 bộ lọc này chỉ 0,44–0,64 — ảnh mờ ranh giới lớp võng mạc (xem hình). <b>Không dùng 4 bộ lọc này</b> cho các ca này.</li>
+<li><b>Bilateral</b> thắng CNR_bg ở cả 4 ca glaucoma và giảm σ nền mạnh nhất (−27,5% so với −17,0% của Wavelet), nhưng làm phẳng kết cấu bên trong lớp mô.
+<b>Wavelet</b> thắng CNR_bg ở 5/6 ca bình thường và giữ biên tốt nhất (β 0,84–0,92, so với 0,83–0,88 của Bilateral), đổi lại còn nhiều speckle.</li>
+<li><b>Bằng chứng phân loại</b> (chỉ có cho Bilateral, vì chưa train model trên Wavelet): trên toàn tập test, pipeline Bilateral tăng specificity
+({pct(dn["spec_raw"])} → {pct(dn["spec_bil"])}, Pyramid raw 15 ep → Pyramid bil96) nhưng giảm sensitivity ({pct(dn["sens_raw"])} → {pct(dn["sens_bil"])}).
+Đúng như vậy trên các ca: ca bình thường #813 chỉ model Bilateral nhận đúng; hai ca glaucoma khó #371 và #774 thì cả 3 model Bilateral bỏ sót.
+Hai pipeline sai ở những ca khác nhau: {dn["raw_only"]} ca raw đúng mà Bilateral sai, {dn["bil_only"]} ca ngược lại.</li></ul>
+<div class="good"><b>Khuyến nghị:</b> (1) <b>Bilateral</b> là lựa chọn chính hiện có bằng chứng (CNR_bg và giảm nhiễu nền tốt nhất; model bil96 có AUC cao nhất 0,827) — hợp khi ưu tiên giảm dương tính giả.
+(2) Với mục tiêu <b>không bỏ sót glaucoma sớm</b> (RNFL mỏng như #371, #774), nên giữ thêm nhánh <b>raw</b> hoặc thử <b>Wavelet</b> (giữ biên tốt nhất, can thiệp nhẹ) — đây là giả thuyết, cần thí nghiệm phân loại có kiểm soát với Wavelet trước khi kết luận.
+(3) Loại TV, NLM, Gaussian, Median.</div>
+<div class="note">Giới hạn: 10 ca không phải mẫu đại diện (chọn theo hành vi model); CNR_bg/β là chỉ số gián tiếp, mask Otsu không phải phân đoạn RNFL; ảnh hiển thị là vùng crop B-scan giữa khối, cùng thang xám với ảnh gốc.</div>
+{dn_cards}</section>
 
 <section id="hsi"><h2>5. MP-HSIR — khử nhiễu ảnh siêu phổ vệ tinh (pilot D1)</h2>
 <div class="note">Thiết kế: checkpoint chính thức <code>Remote_sensing.ckpt</code> (ICCV 2025) → fine-tune <b>292 phút</b> mỗi nhánh trên RTX 3090, batch 16, lr 5e-5, cùng seed và lịch LR.
