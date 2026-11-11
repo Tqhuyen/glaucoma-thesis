@@ -211,7 +211,7 @@ mẫu trên 900 ảnh test (`hf://tqhuyen/glaucoma-raw200-runs/post/report-asset
 - Chưa model nào vượt SOTA `single3d-resxt3d` (77,11%, AUC 0,854); recipe vẫn khác (lr, batch,
   tiêu chí chọn checkpoint).
 
-Báo cáo đầy đủ có hình ca bệnh và saliency: `hf://tqhuyen/glaucoma-raw200-runs/reports/experiments_report.html`
+Báo cáo đầy đủ có hình ca bệnh và saliency: `hf://tqhuyen/glaucoma-raw200-runs/reports/glaucoma_report.html`
 (dựng lại bằng `python scripts/build_report.py`).
 
 ## 6. Kế hoạch đọc kết quả

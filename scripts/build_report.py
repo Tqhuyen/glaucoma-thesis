@@ -8,7 +8,7 @@ Inputs (download with huggingface_hub.snapshot_download, see the report appendix
   artifacts/report_src/hsi/run/outputs              MP-HSIR pilot evaluation
   artifacts/vast/dl_lab_run/outputs                 Urban100 run
 
-    python scripts/build_report.py --out reports/experiments_report.html
+    python scripts/build_report.py          # writes reports/glaucoma_report.html and reports/hsi_report.html
 """
 
 import argparse
@@ -16,6 +16,7 @@ import base64
 import html
 import io
 import json
+import re
 from pathlib import Path
 
 import matplotlib
@@ -64,7 +65,10 @@ WHY_VI = {
 }
 
 
-def img_tag(path_or_fig, width=None, jpeg=False, alt=""):
+EXPORT_DIR = Path("reports/notion_assets")
+
+
+def img_tag(path_or_fig, width=None, jpeg=False, alt="", export=None):
     buf = io.BytesIO()
     if isinstance(path_or_fig, (str, Path)):
         im = Image.open(path_or_fig).convert("RGB")
@@ -74,9 +78,56 @@ def img_tag(path_or_fig, width=None, jpeg=False, alt=""):
         path_or_fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
         plt.close(path_or_fig)
         mime = "png"
+    if export:
+        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        (EXPORT_DIR / f"{export}.png").write_bytes(buf.getvalue())
     w = f' style="width:{width}"' if width else ""
     data = base64.b64encode(buf.getvalue()).decode()
     return f'<img src="data:image/{mime};base64,{data}" alt="{html.escape(alt)}"{w}>'
+
+
+def strip(paths, captions, name, cell=230):
+    """Save a captioned horizontal strip of images (one uploadable file per illustrated case)."""
+    from PIL import ImageDraw
+
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    sheet = Image.new("RGB", (cell * len(paths), cell + 18), "white")
+    draw = ImageDraw.Draw(sheet)
+    for k, (path, caption) in enumerate(zip(paths, captions)):
+        sheet.paste(Image.open(path).convert("RGB").resize((cell, cell), Image.LANCZOS), (k * cell, 18))
+        draw.text((k * cell + 4, 3), caption, fill="black")
+    sheet.save(EXPORT_DIR / f"{name}.png")
+
+
+def export_strips():
+    y, probs = load_probs()
+    for i in (768, 371, 813, 388):
+        names = ["bscan", "enface", "saliency_raw200-pyramid-e15-s42", "saliency_raw200-simple-s42"]
+        caps = ["B-scan", "en-face", "saliency Pyramid raw 15ep", "saliency Simple raw"]
+        strip([ASSETS / f"glaucoma/case{i}_{n}.png" for n in names], caps, f"case{i}")
+    mj = {c["index"]: c["methods"] for c in json.loads((DENOISE / "metrics.json").read_text())["cases"]}
+    for i in (371, 774, 813):
+        caps = [
+            k if k == "original" else f"{k} CNR {mj[i][k]['cnr_bg']:.2f} b {mj[i][k]['beta']:.2f}" for k in DN_METHODS
+        ]
+        strip([DENOISE / f"case{i}_{k}.png" for k in DN_METHODS], caps, f"denoise{i}", cell=200)
+    records = json.loads((ASSETS / "hsi/records.json").read_text())
+    picks = [
+        ("Xiongan", "case4_mixture"),
+        ("Xiongan", "physics_heavy"),
+        ("WDC", "case4_mixture"),
+        ("Houston", "physics_heavy"),
+        ("Chikusei", "gauss50"),
+    ]
+    for set_name, condition in picks:
+        rec = next(r for r in records if r["set"] == set_name and r["condition"] == condition)
+        tags = ("official", "control", "physics")
+        paths = [ASSETS / f"hsi/{set_name}_clean.png", ASSETS / f"hsi/{set_name}_{condition}_noisy.png"]
+        paths += [ASSETS / f"hsi/{set_name}_{condition}_{t}.png" for t in tags]
+        caps = ["clean", f"noisy {rec['psnr_noisy']:.1f} dB"] + [f"{t} {rec[t]['psnr']:.2f} dB" for t in tags]
+        strip(paths, caps, f"hsi_{set_name}_{condition}")
+    tags = ("input", "official", "control", "physics")
+    strip([ASSETS / f"hsi/real_Dioni_{t}_band412.png" for t in tags], [f"{t} ~412 nm" for t in tags], "hsi_real_Dioni")
 
 
 def table(df, fmt=None, highlight=None):
@@ -334,7 +385,7 @@ def glaucoma_section(rng):
         a.legend(loc="lower right", fontsize=8)
     ax[0].set_ylim(55, 82)
     ax[1].set_ylim(0.6, 0.9)
-    figs["bars"] = img_tag(fig, "100%")
+    figs["bars"] = img_tag(fig, "100%", export="glaucoma_bars")
 
     fig, ax = plt.subplots(figsize=(6.2, 5.2))
     for k in order:
@@ -358,7 +409,7 @@ def glaucoma_section(rng):
         a.set_xlabel("epoch")
         a.grid(alpha=0.3)
     ax[1].legend(fontsize=7.5, ncol=2)
-    figs["curves"] = img_tag(fig, "100%")
+    figs["curves"] = img_tag(fig, "100%", export="glaucoma_curves")
 
     right = {k: (probs[k] > 0.5) == y for k in order}
     n = len(order)
@@ -380,7 +431,7 @@ def glaucoma_section(rng):
             )
     fig.colorbar(im, ax=ax, label="tương quan Pearson của P(glaucoma)")
     ax.set_title("Hai model ra quyết định giống nhau đến mức nào")
-    figs["disagree"] = img_tag(fig, "560px")
+    figs["disagree"] = img_tag(fig, "560px", export="glaucoma_corr")
 
     n_right = np.sum([right[k] for k in order], 0)
     fig, ax = plt.subplots(figsize=(7.5, 3.6))
@@ -427,7 +478,7 @@ def glaucoma_section(rng):
         a.set_yticks([0, 1], ["thật −", "thật +"])
         a.set_title(SHORT[k], fontsize=9)
     fig.tight_layout()
-    figs["cm"] = img_tag(fig, "100%")
+    figs["cm"] = img_tag(fig, "100%", export="glaucoma_cm")
 
     tests = [
         ("raw200-pyramid-e15-s42", "raw200-pyramid-s42", "15 epoch so với 8 epoch (cùng Pyramid, raw)"),
@@ -655,7 +706,7 @@ def hsi_section():
         a.set_title(ttl)
         a.legend(fontsize=8)
         a.grid(axis="y", alpha=0.3)
-    fig_cond = img_tag(fig, "100%")
+    fig_cond = img_tag(fig, "100%", export="hsi_cond")
 
     fig, ax = plt.subplots(figsize=(7, 3.6))
     for arm, col in (("control", "#1f77b4"), ("physics", "#d62728")):
@@ -665,7 +716,7 @@ def hsi_section():
     ax.set_ylabel("L1 loss (trung bình trượt)")
     ax.set_title("Loss khi fine-tune (cùng thời lượng 292 phút)")
     ax.legend()
-    fig_loss = img_tag(fig, "560px")
+    fig_loss = img_tag(fig, "560px", export="hsi_loss")
 
     records = json.loads((ASSETS / "hsi/records.json").read_text())
     gallery = []
@@ -904,14 +955,72 @@ Dữ liệu train: 2832 patch từ WDC, PaviaC, PaviaU, Houston, Chikusei (vùng
 <tr><td>W&B <code>glaucoma-thesis</code></td><td>Mọi run glaucoma (raw 200³ replay từ local)</td></tr></table>
 <p>Code: <code>glaucoma-thesis</code> (models/glaucoma, scripts/vast_*, scripts/report_assets.py, scripts/build_report.py) · <code>deep-learning-laboratory/hsi_mphsir</code>.</p></section>
 </main></body></html>"""
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(doc, encoding="utf-8")
-    print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)")
+    sections = dict(re.findall(r'(?s)<section id="(\w+)">(.*?)</section>', doc))
+    storage = "Toàn bộ model, checkpoint, log lưu trên Hugging Face (private)"
+    g_summary = f"""<h2>1. Tóm tắt kết quả</h2>
+<div class="kpi">
+<div>Model 3D tốt nhất đợt này (acc)<b>{SHORT[best]} — {pct(m[best]["acc"])}</b>AUC {m[best]["auc"]:.3f} · MCC {m[best]["mcc"]:.3f}</div>
+<div>SOTA hiện tại của luận văn<b>ResNeXt3D đơn nhánh — 77,11%</b>AUC 0,854 · MCC 0,542 (chưa bị vượt)</div>
+<div>Pyramid raw 200³: 15 so với 8 epoch<b>{pct(e15["acc"])} vs {pct(p8["acc"])}</b>AUC {e15["auc"]:.3f} vs {p8["auc"]:.3f}</div>
+</div><ul>{"".join(re.findall(r"(?s)<li>.*?</li>", sections["tomtat"])[:3])}</ul>"""
+    h_summary = f"""<h2>1. Tóm tắt kết quả</h2>
+<div class="kpi">
+<div>MP-HSIR: D1 vật lý − control<b>+{d1c:.2f} dB · +{d1h:.2f} dB</b>nhiễu vật lý / nhiễu vật lý ×2</div>
+<div>Xiong'an (scene chưa thấy)<b>37,71 → 28,82 / 30,84 dB</b>official → control / D1</div>
+<div>Urban100 σ25 thích nghi<b>+{usumm["gain"]:.3f} dB</b>{usumm["n"]} ảnh, không ảnh nào tụt &gt;0,05 dB</div>
+</div><ul>{"".join(re.findall(r"(?s)<li>.*?</li>", sections["tomtat"])[3:])}</ul>"""
+    limits = re.findall(r"(?s)<li>.*?</li>", sections["gioihan"])
+    g_limits = f"""<h2>Giới hạn và bước tiếp theo</h2><ul>{"".join(limits[:3])}
+<li>Đề xuất: (1) chuẩn hoá một protocol (15 ep, batch 16, augmentation, chọn theo val AUC, 3 seed) cho Pyramid/ResNeXt; (2) thí nghiệm phân loại có kiểm soát với BM3D (CUDA) và Wavelet so với Bilateral.</li></ul>"""
+    h_limits = f"""<h2>Giới hạn và bước tiếp theo</h2><ul>{limits[3]}
+<li>Fine-tune chỉ trên 5 scene, 1 seed mỗi nhánh; Xiong'an là scene held-out duy nhất.</li>
+<li>Đề xuất: fine-tune có regularizer giữ gần checkpoint gốc hoặc thêm nhiều scene để tránh sụp trên scene mới; fit tham số nhiễu từ ảnh L1 thật.</li></ul>"""
+    h_storage = """<h2>Nơi lưu dữ liệu</h2><p><code>tqhuyen/hsi-mphsir-pilot</code> (checkpoint 2 nhánh, eval.csv, Stage 0, HyRank, dữ liệu đã xử lý) ·
+<code>tqhuyen/hsi-mphsir-smoke</code> · ảnh output: <code>tqhuyen/glaucoma-raw200-runs/post/report-assets/hsi</code> ·
+Urban100: <code>tqhuyen/glaucoma-raw200-runs/post/urban100-s25-seed2</code> · code: <code>deep-learning-laboratory/hsi_mphsir</code>.</p>"""
+    pages = {
+        "glaucoma_report.html": (
+            "Báo cáo thí nghiệm: Glaucoma 3D CNN trên OCT Harvard-GF",
+            "Tập test: 900 khối OCT (489 glaucoma / 411 bình thường), cùng thứ tự mẫu cho mọi model",
+            [
+                ("tomtat", "Tóm tắt", g_summary),
+                ("glaucoma", "So sánh model", sections["glaucoma"]),
+                ("khacbiet", "Model khác nhau ở đâu", sections["khacbiet"]),
+                ("ca", "Ca minh hoạ", sections["ca"]),
+                ("khunhieu", "Khử nhiễu cho các ca", sections["khunhieu"]),
+                ("hatang", "Chi phí & hạ tầng", sections["hatang"]),
+                ("gioihan", "Giới hạn", g_limits),
+                ("phuluc", "Phụ lục", sections["phuluc"]),
+            ],
+        ),
+        "hsi_report.html": (
+            "Báo cáo thí nghiệm: MP-HSIR khử nhiễu ảnh siêu phổ vệ tinh (pilot D1)",
+            "Checkpoint chính thức ICCV 2025 → fine-tune control so với nhiễu vật lý, RTX 3090, 292 phút mỗi nhánh",
+            [
+                ("tomtat", "Tóm tắt", h_summary),
+                ("hsi", "MP-HSIR", sections["hsi"]),
+                ("urban", "Phụ: Urban100", sections["urban"]),
+                ("gioihan", "Giới hạn", h_limits),
+                ("phuluc", "Nơi lưu dữ liệu", h_storage),
+            ],
+        ),
+    }
+    out.mkdir(parents=True, exist_ok=True)
+    for name, (title, subtitle, parts) in pages.items():
+        nav = "".join(f'<a href="#{i}">{label}</a>' for i, label, _ in parts)
+        body = "".join(f'<section id="{i}">{content}</section>\n' for i, _, content in parts)
+        page = f"""<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>{title}</title>
+<style>{CSS}</style></head><body><header><h1>{title}</h1>
+<p>Đợt chạy 07–11/11/2026 · Kaggle (T4), Modal, vast.ai (RTX 3090) · {storage}</p><p>{subtitle}</p></header>
+<nav>{nav}</nav><main>{body}</main></body></html>"""
+        (out / name).write_text(page, encoding="utf-8")
+        print(f"wrote {out / name} ({(out / name).stat().st_size / 1e6:.1f} MB)")
+    export_strips()
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=Path("reports/experiments_report.html"))
+    parser.add_argument("--out", type=Path, default=Path("reports"), help="output directory")
     build(parser.parse_args().out)
 
 
